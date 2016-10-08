@@ -1,6 +1,10 @@
 # Alpenhorn
 
-Alpenhorn is a new system for bootstrapping secure communication without
-leaking metadata.  Our paper has been accepted to OSDI 2016.  The paper
-and source code will be available soon!  In the meantime, you can
+Alpenhorn is the first system for initiating an encrypted connection
+between two users that provides strong privacy and forward secrecy
+guarantees for all metadata.  Alpenhorn does not require out-of-band
+communication other that knowing the other user's email address.
+Learn more by reading our [OSDI 2016 paper](https://davidlazar.org/papers/alpenhorn.pdf).
+
+We will publish our source code soon!  In the meantime, you can
 follow our work by [joining our email list](https://vuvuzela.io).
