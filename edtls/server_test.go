@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -12,7 +13,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"crypto/x509"
 
 	"golang.org/x/crypto/ed25519"
 )
