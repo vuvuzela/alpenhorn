@@ -94,7 +94,7 @@ func writeNewConfig() {
 	}
 	data := buf.Bytes()
 
-	path := "server-init.conf"
+	path := "mixer-init.conf"
 	err = ioutil.WriteFile(path, data, 0600)
 	if err != nil {
 		log.Fatal(err)
