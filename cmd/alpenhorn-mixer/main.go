@@ -47,8 +47,8 @@ var funcMap = template.FuncMap{
 
 const confTemplate = `# Alpenhorn mixnet server config
 
-serverName = {{.Mixnet.ServerName | printf "%q"}}
-listenAddr = {{.Mixnet.ListenAddr | printf "%q"}}
+serverName = {{.ServerName | printf "%q"}}
+listenAddr = {{.ListenAddr | printf "%q"}}
 
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
