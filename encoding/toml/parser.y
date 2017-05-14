@@ -65,9 +65,16 @@ tables
 	: /**/ { $$ = make(map[string]interface{}) }
 	| tables table {
 		m := $1
-		for _, key := range $2.keys {
+		for i, key := range $2.keys {
 			v, ok := m[key]
 			if !ok {
+				if $2.isArray && i == len($2.keys)-1 {
+					array := make([]map[string]interface{}, 1)
+					array[0] = make(map[string]interface{})
+					m[key] = array
+					m = array[0]
+					continue
+				}
 				nestedMap := make(map[string]interface{})
 				m[key] = nestedMap
 				m = nestedMap
@@ -75,7 +82,23 @@ tables
 			}
 			switch t := v.(type) {
 			case map[string]interface{}:
+				if $2.isArray && i == len($2.keys)-1 {
+					yylex.Error(fmt.Sprintf("key %q used as array but previously defined as map", key))
+					return 1
+				}
 				m = t
+			case []map[string]interface{}:
+				if $2.isArray && i == len($2.keys)-1 {
+					arrayElement := make(map[string]interface{})
+					t = append(t, arrayElement)
+					m[key] = t
+					m = arrayElement
+				} else if !$2.isArray && i == len($2.keys)-1 {
+					yylex.Error(fmt.Sprintf("key %q used as map but previously defined as array", key))
+					return 1
+				} else {
+					m = t[len(t)-1]
+				}
 			default:
 				yylex.Error(fmt.Sprintf("key %q already defined as non-map value", key))
 				return 1
@@ -90,6 +113,13 @@ table
 	: itemLeftBracket keys itemRightBracket entries {
 		$$ = table{
 			isArray: false,
+			keys: $2,
+			entries: $4,
+		}
+	}
+	| itemLeftDoubleBracket keys itemRightDoubleBracket entries {
+		$$ = table{
+			isArray: true,
 			keys: $2,
 			entries: $4,
 		}

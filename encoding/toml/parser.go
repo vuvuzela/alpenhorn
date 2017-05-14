@@ -76,51 +76,47 @@ var yyExca = [...]int{
 	-2, 0,
 }
 
-const yyNprod = 16
 const yyPrivate = 57344
 
-var yyTokenNames []string
-var yyStates []string
-
-const yyLast = 24
+const yyLast = 28
 
 var yyAct = [...]int{
 
-	11, 12, 2, 15, 21, 8, 22, 7, 17, 13,
-	14, 16, 5, 10, 1, 9, 19, 6, 3, 20,
-	18, 4, 0, 23,
+	13, 2, 14, 25, 17, 26, 19, 9, 19, 18,
+	15, 16, 20, 7, 8, 10, 5, 11, 22, 1,
+	23, 6, 24, 3, 12, 21, 4, 27,
 }
 var yyPact = [...]int{
 
-	-1000, -1000, 6, 0, -1000, -7, -1000, 7, -4, 2,
-	-1000, -1000, -1000, -1000, -1000, -4, -1000, -1000, -5, -1000,
-	6, -1000, -4, -1000,
+	-1000, -1000, 10, 6, -1000, -5, -1000, 11, 11, -3,
+	0, -1000, 2, -1000, -1000, -1000, -1000, -3, -1000, -1000,
+	-1000, -6, -1000, 10, 10, -1000, -3, -1000,
 }
 var yyPgo = [...]int{
 
-	0, 21, 2, 0, 20, 18, 17, 15, 14,
+	0, 26, 1, 0, 25, 23, 21, 15, 19,
 }
 var yyR1 = [...]int{
 
-	0, 8, 5, 5, 6, 7, 7, 2, 2, 1,
-	3, 3, 3, 3, 4, 4,
+	0, 8, 5, 5, 6, 6, 7, 7, 2, 2,
+	1, 3, 3, 3, 3, 4, 4,
 }
 var yyR2 = [...]int{
 
-	0, 2, 0, 2, 4, 1, 2, 0, 2, 3,
-	1, 1, 1, 3, 1, 3,
+	0, 2, 0, 2, 4, 4, 1, 2, 0, 2,
+	3, 1, 1, 1, 3, 1, 3,
 }
 var yyChk = [...]int{
 
-	-1000, -8, -2, -5, -1, 6, -6, 7, 12, -7,
-	6, -3, 5, 13, 14, 7, 9, 6, -4, -3,
-	-2, 9, 11, -3,
+	-1000, -8, -2, -5, -1, 6, -6, 7, 8, 12,
+	-7, 6, -7, -3, 5, 13, 14, 7, 9, 6,
+	10, -4, -3, -2, -2, 9, 11, -3,
 }
 var yyDef = [...]int{
 
-	7, -2, 2, 1, 8, 0, 3, 0, 0, 0,
-	5, 9, 10, 11, 12, 0, 7, 6, 0, 14,
-	4, 13, 0, 15,
+	8, -2, 2, 1, 9, 0, 3, 0, 0, 0,
+	0, 6, 0, 10, 11, 12, 13, 0, 8, 7,
+	8, 0, 15, 4, 5, 14, 0, 16,
 }
 var yyTok1 = [...]int{
 
@@ -492,9 +488,16 @@ yydefault:
 		//line parser.y:66
 		{
 			m := yyDollar[1].tables
-			for _, key := range yyDollar[2].table.keys {
+			for i, key := range yyDollar[2].table.keys {
 				v, ok := m[key]
 				if !ok {
+					if yyDollar[2].table.isArray && i == len(yyDollar[2].table.keys)-1 {
+						array := make([]map[string]interface{}, 1)
+						array[0] = make(map[string]interface{})
+						m[key] = array
+						m = array[0]
+						continue
+					}
 					nestedMap := make(map[string]interface{})
 					m[key] = nestedMap
 					m = nestedMap
@@ -502,7 +505,23 @@ yydefault:
 				}
 				switch t := v.(type) {
 				case map[string]interface{}:
+					if yyDollar[2].table.isArray && i == len(yyDollar[2].table.keys)-1 {
+						yylex.Error(fmt.Sprintf("key %q used as array but previously defined as map", key))
+						return 1
+					}
 					m = t
+				case []map[string]interface{}:
+					if yyDollar[2].table.isArray && i == len(yyDollar[2].table.keys)-1 {
+						arrayElement := make(map[string]interface{})
+						t = append(t, arrayElement)
+						m[key] = t
+						m = arrayElement
+					} else if !yyDollar[2].table.isArray && i == len(yyDollar[2].table.keys)-1 {
+						yylex.Error(fmt.Sprintf("key %q used as map but previously defined as array", key))
+						return 1
+					} else {
+						m = t[len(t)-1]
+					}
 				default:
 					yylex.Error(fmt.Sprintf("key %q already defined as non-map value", key))
 					return 1
@@ -514,7 +533,7 @@ yydefault:
 		}
 	case 4:
 		yyDollar = yyS[yypt-4 : yypt+1]
-		//line parser.y:90
+		//line parser.y:113
 		{
 			yyVAL.table = table{
 				isArray: false,
@@ -523,39 +542,49 @@ yydefault:
 			}
 		}
 	case 5:
+		yyDollar = yyS[yypt-4 : yypt+1]
+		//line parser.y:120
+		{
+			yyVAL.table = table{
+				isArray: true,
+				keys:    yyDollar[2].keys,
+				entries: yyDollar[4].entries,
+			}
+		}
+	case 6:
 		yyDollar = yyS[yypt-1 : yypt+1]
-		//line parser.y:99
+		//line parser.y:129
 		{
 			yyVAL.keys = []string{yyDollar[1].str}
 		}
-	case 6:
+	case 7:
 		yyDollar = yyS[yypt-2 : yypt+1]
-		//line parser.y:100
+		//line parser.y:130
 		{
 			yyVAL.keys = append(yyDollar[1].keys, yyDollar[2].str)
 		}
-	case 7:
+	case 8:
 		yyDollar = yyS[yypt-0 : yypt+1]
-		//line parser.y:103
+		//line parser.y:133
 		{
 			yyVAL.entries = map[string]interface{}{}
 		}
-	case 8:
+	case 9:
 		yyDollar = yyS[yypt-2 : yypt+1]
-		//line parser.y:104
+		//line parser.y:134
 		{
 			yyDollar[1].entries[yyDollar[2].entry.key] = yyDollar[2].entry.val
 			yyVAL.entries = yyDollar[1].entries
 		}
-	case 9:
+	case 10:
 		yyDollar = yyS[yypt-3 : yypt+1]
-		//line parser.y:107
+		//line parser.y:137
 		{
 			yyVAL.entry = entry{yyDollar[1].str, yyDollar[3].value}
 		}
-	case 10:
+	case 11:
 		yyDollar = yyS[yypt-1 : yypt+1]
-		//line parser.y:110
+		//line parser.y:140
 		{
 			if yyDollar[1].str == "true" {
 				yyVAL.value = true
@@ -563,9 +592,9 @@ yydefault:
 				yyVAL.value = false
 			}
 		}
-	case 11:
+	case 12:
 		yyDollar = yyS[yypt-1 : yypt+1]
-		//line parser.y:111
+		//line parser.y:141
 		{
 			if strings.Contains(yyDollar[1].str, ".") {
 				n, err := strconv.ParseFloat(yyDollar[1].str, 64)
@@ -583,9 +612,9 @@ yydefault:
 				yyVAL.value = n
 			}
 		}
-	case 12:
+	case 13:
 		yyDollar = yyS[yypt-1 : yypt+1]
-		//line parser.y:128
+		//line parser.y:158
 		{
 			s, err := strconv.Unquote(yyDollar[1].str)
 			if err != nil {
@@ -594,21 +623,21 @@ yydefault:
 			}
 			yyVAL.value = s
 		}
-	case 13:
+	case 14:
 		yyDollar = yyS[yypt-3 : yypt+1]
-		//line parser.y:136
+		//line parser.y:166
 		{
 			yyVAL.value = yyDollar[2].values
 		}
-	case 14:
+	case 15:
 		yyDollar = yyS[yypt-1 : yypt+1]
-		//line parser.y:139
+		//line parser.y:169
 		{
 			yyVAL.values = []interface{}{yyDollar[1].value}
 		}
-	case 15:
+	case 16:
 		yyDollar = yyS[yypt-3 : yypt+1]
-		//line parser.y:140
+		//line parser.y:170
 		{
 			yyVAL.values = append(yyDollar[1].values, yyDollar[3].value)
 		}

@@ -19,6 +19,7 @@ type config struct {
 	ExtraData  []byte
 	Count      int
 	Servers    map[string]serverInfo
+	Clients    []clientInfo `mapstructure:"client"`
 }
 
 type serverInfo struct {
@@ -27,6 +28,11 @@ type serverInfo struct {
 	B        float64
 	Wait     time.Duration
 	Optional []byte
+}
+
+type clientInfo struct {
+	Username string
+	Friends  map[string]ed25519.PublicKey
 }
 
 const tomlConfig = `
@@ -50,6 +56,19 @@ mu = 9000
 b = 4000.714
 wait = 1000000000
 optional = [3, 0, 1, 2]
+
+[[client]]
+username = "alice"
+
+[client.friends]
+bob = "m3vzyq6r1m27m1se385qhdprzbab6xhyy6ftv5w3mhttej3qmdp0"
+eve = "2myv6p59nb9a7g2n27etd4cv3mhcznp4hc2z0dm18cksasajs10g"
+
+[[client]]
+username = "sam"
+
+[client.friends]
+eve = "d3311ab5xyzmw6r5tmffama53xct661ky0yb9hrm1xfmvzh9gnk0"
 `
 
 func TestDecode(t *testing.T) {
@@ -97,4 +116,34 @@ func TestDecode(t *testing.T) {
 	if !bytes.Equal(c.Servers["beta"].Optional, []byte{3, 0, 1, 2}) {
 		t.Fatalf("unexpected optional value for server beta: %#v", c.Servers["beta"].Optional)
 	}
+
+	if len(c.Clients) != 2 {
+		t.Fatalf("unexpected number of clients, got %d want %d", len(c.Clients), 2)
+	}
+	if c.Clients[0].Username != "alice" {
+		t.Fatalf("wrong username for first client, got %q want %q", c.Clients[0].Username, "alice")
+	}
+	if len(c.Clients[0].Friends) != 2 {
+		t.Fatalf("unexpected number of friends for first client, got %d want %d", len(c.Clients[0].Friends), 2)
+	}
+	if !bytes.Equal(c.Clients[0].Friends["bob"], decodeBytes("m3vzyq6r1m27m1se385qhdprzbab6xhyy6ftv5w3mhttej3qmdp0")) {
+		t.Fatalf("bad key for bob in client 1, got %s", EncodeBytes(c.Clients[0].Friends["bob"]))
+	}
+	if !bytes.Equal(c.Clients[0].Friends["eve"], decodeBytes("2myv6p59nb9a7g2n27etd4cv3mhcznp4hc2z0dm18cksasajs10g")) {
+		t.Fatalf("bad key for eve in client 1, got %s", EncodeBytes(c.Clients[0].Friends["eve"]))
+	}
+	if c.Clients[1].Username != "sam" {
+		t.Fatalf("wrong username for first client, got %q want %q", c.Clients[1].Username, "sam")
+	}
+	if !bytes.Equal(c.Clients[1].Friends["eve"], decodeBytes("d3311ab5xyzmw6r5tmffama53xct661ky0yb9hrm1xfmvzh9gnk0")) {
+		t.Fatalf("bad key for eve in client 2, got %s", EncodeBytes(c.Clients[1].Friends["eve"]))
+	}
+}
+
+func decodeBytes(str string) []byte {
+	data, err := DecodeBytes(str)
+	if err != nil {
+		panic(err)
+	}
+	return data
 }

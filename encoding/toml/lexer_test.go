@@ -8,9 +8,18 @@ import (
 	"testing"
 )
 
-func TestLexComment(t *testing.T) {
-	lx := lex("test", "# hello world\n# foobar\n[hello.world]x = [1,-22.987,3,true,[false]]\ny = false", lexTableBody)
-	vals := []string{"[", "hello", "world", "]", "x", "=", "[", "1", ",", "-22.987", ",", "3", ",", "true", ",", "[", "false", "]", "]", "y", "=", "false"}
+var lexData = `# hello world
+# foobar
+[hello.world]x = [1,-22.987,3,true,[false]]
+y = false
+
+[[thing.fruit]]
+name = "apple"
+`
+
+func TestLex(t *testing.T) {
+	lx := lex("test", lexData, lexTableBody)
+	vals := []string{"[", "hello", "world", "]", "x", "=", "[", "1", ",", "-22.987", ",", "3", ",", "true", ",", "[", "false", "]", "]", "y", "=", "false", "[[", "thing", "fruit", "]]", "name", "=", "\"apple\""}
 	i := 0
 	for {
 		item := lx.nextItem()
