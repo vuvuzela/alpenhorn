@@ -277,7 +277,7 @@ func (srv *Server) loop() {
 
 		round++
 		srv.round = round
-		srv.onions = make([][]byte, len(srv.onions))
+		srv.onions = make([][]byte, 0, len(srv.onions))
 		srv.mu.Unlock()
 
 		logger.Info("waiting for next round")
