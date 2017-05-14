@@ -1,4 +1,4 @@
-//go:generate -command yacc go tool yacc
+//go:generate -command yacc goyacc
 //go:generate yacc -o parser.go parser.y
 
 /*
