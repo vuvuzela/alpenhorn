@@ -113,14 +113,14 @@ table
 	: itemLeftBracket keys itemRightBracket entries {
 		$$ = table{
 			isArray: false,
-			keys: $2,
+			keys:    $2,
 			entries: $4,
 		}
 	}
 	| itemLeftDoubleBracket keys itemRightDoubleBracket entries {
 		$$ = table{
 			isArray: true,
-			keys: $2,
+			keys:    $2,
 			entries: $4,
 		}
 	}
