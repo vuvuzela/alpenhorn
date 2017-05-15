@@ -32,7 +32,6 @@ var (
 )
 
 type Config struct {
-	ServerName string
 	ListenAddr string
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
@@ -47,7 +46,6 @@ var funcMap = template.FuncMap{
 
 const confTemplate = `# Alpenhorn mixnet server config
 
-serverName = {{.ServerName | printf "%q"}}
 listenAddr = {{.ListenAddr | printf "%q"}}
 
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
@@ -69,7 +67,6 @@ func writeNewConfig() {
 	}
 
 	conf := &Config{
-		ServerName: "server1",
 		ListenAddr: "0.0.0.0:28000",
 		PublicKey:  publicKey,
 		PrivateKey: privateKey,
@@ -124,9 +121,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	globalConf, err := config.ReadFile(*globalConfPath)
+	globalConf, err := config.ReadGlobalConfigFile(*globalConfPath)
 	if err != nil {
 		log.Fatal(err)
+	}
+	alpConf, err := globalConf.AlpenhornConfig()
+	if err != nil {
+		log.Fatalf("error reading alpenhorn config from %q: %s", *globalConfPath, err)
+	}
+	if alpConf.CDN.Key == nil || alpConf.CDN.Address == "" {
+		log.Fatal("alpenhorn cdn is missing a key or address")
+	}
+	coordinatorKey := alpConf.Coordinator.Key
+	if coordinatorKey == nil {
+		log.Fatal("no alpenhorn coordinator key specified in global config")
 	}
 
 	data, err := ioutil.ReadFile(*confPath)
@@ -139,29 +147,49 @@ func main() {
 		log.Fatalf("error parsing config %q: %s", *confPath, err)
 	}
 
-	serverPos := globalConf.MixerPosition(conf.ServerName)
-	if serverPos < 0 {
-		log.Fatalf("server %s not found in global mixer list", conf.ServerName)
+	mixers := alpConf.Mixers
+	ourPos := -1
+	for i, mixer := range mixers {
+		if bytes.Equal(mixer.Key, conf.PublicKey) {
+			ourPos = i
+			break
+		}
+	}
+	if ourPos < 0 {
+		log.Fatal("our key was not found in the alpenhorn mixer list")
+	}
+
+	var prevServerKey ed25519.PublicKey
+	if ourPos == 0 {
+		prevServerKey = coordinatorKey
+	} else {
+		prevServerKey = mixers[ourPos-1].Key
+		if prevServerKey == nil {
+			// first mixer in the config file is called "mixer 1"
+			log.Fatalf("alpenhorn mixer %d has no key", ourPos-1+1)
+		}
 	}
 
 	var nextServer *vrpc.Client
-	nextInfo := globalConf.NextMixer(conf.ServerName)
-	if nextInfo != nil {
-		nextServer, err = vrpc.Dial("tcp", nextInfo.Address, nextInfo.PublicKey, conf.PrivateKey, runtime.NumCPU())
+	lastServer := ourPos == len(mixers)-1
+	if !lastServer {
+		next := mixers[ourPos+1]
+		if next.Key == nil || next.Address == "" {
+			log.Fatalf("alpenhorn mixer %d is missing a key or address", ourPos+1+1)
+		}
+		nextServer, err = vrpc.Dial("tcp", next.Address, next.Key, conf.PrivateKey, runtime.NumCPU())
 		if err != nil {
 			log.Fatalf("vrpc.Dial: %s", err)
 		}
 	}
 
-	cdn := globalConf.GetServer(globalConf.CDN)
-
 	addFriendMixnet := &mixnet.Server{
 		SigningKey:     conf.PrivateKey,
-		ServerPosition: serverPos,
-		NumServers:     len(globalConf.Mixers),
+		ServerPosition: ourPos,
+		NumServers:     len(mixers),
 		NextServer:     nextServer,
-		CDNAddr:        cdn.Address,
-		CDNPublicKey:   cdn.PublicKey,
+		CDNAddr:        alpConf.CDN.Address,
+		CDNPublicKey:   alpConf.CDN.Key,
 
 		Mixer:   &addfriend.Mixer{},
 		Laplace: conf.AddFriendNoise,
@@ -169,34 +197,28 @@ func main() {
 
 	dialingMixnet := &mixnet.Server{
 		SigningKey:     conf.PrivateKey,
-		ServerPosition: serverPos,
-		NumServers:     len(globalConf.Mixers),
+		ServerPosition: ourPos,
+		NumServers:     len(mixers),
 		NextServer:     nextServer,
-		CDNAddr:        cdn.Address,
-		CDNPublicKey:   cdn.PublicKey,
+		CDNAddr:        alpConf.CDN.Address,
+		CDNPublicKey:   alpConf.CDN.Key,
 
 		Mixer:   &dialing.Mixer{},
 		Laplace: conf.DialingNoise,
 	}
 
-	entryServer := globalConf.GetServer(globalConf.EntryServer)
-	if entryServer == nil {
-		log.Fatalf("no entry server defined in global config")
-	}
-
 	srv := new(vrpc.Server)
-	if err := srv.Register(entryServer.PublicKey, "DialingCoordinator", &mixnet.CoordinatorService{dialingMixnet}); err != nil {
+	if err := srv.Register(coordinatorKey, "DialingCoordinator", &mixnet.CoordinatorService{dialingMixnet}); err != nil {
 		log.Fatalf("vrpc.Register: %s", err)
 	}
-	if err := srv.Register(entryServer.PublicKey, "AddFriendCoordinator", &mixnet.CoordinatorService{addFriendMixnet}); err != nil {
+	if err := srv.Register(coordinatorKey, "AddFriendCoordinator", &mixnet.CoordinatorService{addFriendMixnet}); err != nil {
 		log.Fatalf("vrpc.Register: %s", err)
 	}
 
-	prevServer := globalConf.PrevMixer(conf.ServerName)
-	if err := srv.Register(prevServer.PublicKey, "DialingChain", &mixnet.ChainService{dialingMixnet}); err != nil {
+	if err := srv.Register(prevServerKey, "DialingChain", &mixnet.ChainService{dialingMixnet}); err != nil {
 		log.Fatalf("vrpc.Register: %s", err)
 	}
-	if err := srv.Register(prevServer.PublicKey, "AddFriendChain", &mixnet.ChainService{addFriendMixnet}); err != nil {
+	if err := srv.Register(prevServerKey, "AddFriendChain", &mixnet.ChainService{addFriendMixnet}); err != nil {
 		log.Fatalf("vrpc.Register: %s", err)
 	}
 

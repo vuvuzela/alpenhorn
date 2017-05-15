@@ -6,134 +6,213 @@
 package config
 
 import (
-	"fmt"
 	"io/ioutil"
 
-	log "github.com/Sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/encoding/toml"
+	"vuvuzela.io/alpenhorn/errors"
 )
 
-type ServerInfo struct {
-	Address   string
-	PublicKey ed25519.PublicKey
+type GlobalConfig interface {
+	// AlpenhornConfig returns the Alpenhorn configuration from a global
+	// config. It does not return an error if fields are missing, so the
+	// caller should validate required fields before using them.
+	AlpenhornConfig() (*AlpenhornConfig, error)
 
-	// EntryAddress is only used by PKG servers.
-	EntryAddress string `json:",omitempty"`
+	// VuvuzelaConfig returns the Vuvuzela configuration from a global
+	// config with the same caveat as AlpenhornConfig.
+	VuvuzelaConfig() (*VuvuzelaConfig, error)
 }
 
-type ServerMap map[string]*ServerInfo
-
-type ServerList []*ServerInfo
-
-func (m ServerMap) GetServer(server string) *ServerInfo {
-	return m[server]
+type AlpenhornConfig struct {
+	Coordinator Coordinator
+	PKGs        []PKG
+	Mixers      []Mixer
+	CDN         CDN
 }
 
-func (m ServerMap) GetServers(servers []string) ServerList {
-	infos := make(ServerList, len(servers))
-	for i, srv := range servers {
-		info, ok := m[srv]
-		if !ok {
-			log.Fatalf("GetServers: server %s not found", srv)
+type VuvuzelaConfig struct {
+	Coordinator Coordinator
+	Mixers      []Mixer
+}
+
+type Coordinator struct {
+	Key           ed25519.PublicKey
+	ClientAddress string
+}
+
+type PKG struct {
+	Key                ed25519.PublicKey
+	ClientAddress      string
+	CoordinatorAddress string
+}
+
+type Mixer struct {
+	Key     ed25519.PublicKey
+	Address string
+}
+
+type CDN struct {
+	Key     ed25519.PublicKey
+	Address string
+}
+
+// globalConfig and its corresponding types are used to
+// decode the TOML config file.
+type globalConfig struct {
+	Alpenhorn *alpenhornConfig
+	Vuvuzela  *vuvuzelaConfig
+	Keys      map[string]ed25519.PublicKey
+}
+
+type alpenhornConfig struct {
+	Coordinator coordinatorConfig
+	PKG         []pkgConfig
+	Mixer       []mixerConfig
+	CDN         cdnConfig
+}
+
+type coordinatorConfig struct {
+	Key           string // Key is an entry in the globalConfig.Keys map.
+	ClientAddress string
+}
+
+type pkgConfig struct {
+	Key                string
+	ClientAddress      string
+	CoordinatorAddress string
+}
+
+type mixerConfig struct {
+	Key     string
+	Address string
+}
+
+type cdnConfig struct {
+	Key     string
+	Address string
+}
+
+type vuvuzelaConfig struct {
+	Coordinator coordinatorConfig
+	Mixer       []mixerConfig
+}
+
+func (conf *globalConfig) getKey(keyName string) (ed25519.PublicKey, error) {
+	if keyName == "" {
+		return nil, nil
+	}
+	key, ok := conf.Keys[keyName]
+	if !ok {
+		return nil, errors.New("key %q not found", keyName)
+	}
+	return key, nil
+}
+
+func (conf *globalConfig) AlpenhornConfig() (*AlpenhornConfig, error) {
+	if conf.Alpenhorn == nil {
+		return nil, errors.New("no alpenhorn config")
+	}
+
+	coordinatorKey, err := conf.getKey(conf.Alpenhorn.Coordinator.Key)
+	if err != nil {
+		return nil, err
+	}
+	coordinator := Coordinator{
+		Key:           coordinatorKey,
+		ClientAddress: conf.Alpenhorn.Coordinator.ClientAddress,
+	}
+
+	pkgs := make([]PKG, len(conf.Alpenhorn.PKG))
+	for i, pkgConf := range conf.Alpenhorn.PKG {
+		key, err := conf.getKey(pkgConf.Key)
+		if err != nil {
+			return nil, err
 		}
-		infos[i] = info
+		pkgs[i] = PKG{
+			Key:                key,
+			ClientAddress:      pkgConf.ClientAddress,
+			CoordinatorAddress: pkgConf.CoordinatorAddress,
+		}
 	}
-	return infos
-}
 
-func (xs ServerList) Addrs() []string {
-	keys := make([]string, len(xs))
-	for i, srv := range xs {
-		keys[i] = srv.Address
+	mixers := make([]Mixer, len(conf.Alpenhorn.Mixer))
+	for i, mixerConf := range conf.Alpenhorn.Mixer {
+		key, err := conf.getKey(mixerConf.Key)
+		if err != nil {
+			return nil, err
+		}
+		mixers[i] = Mixer{
+			Key:     key,
+			Address: mixerConf.Address,
+		}
 	}
-	return keys
-}
 
-func (xs ServerList) Keys() []ed25519.PublicKey {
-	keys := make([]ed25519.PublicKey, len(xs))
-	for i, srv := range xs {
-		keys[i] = srv.PublicKey
+	cdnKey, err := conf.getKey(conf.Alpenhorn.CDN.Key)
+	if err != nil {
+		return nil, err
 	}
-	return keys
+	cdn := CDN{
+		Key:     cdnKey,
+		Address: conf.Alpenhorn.CDN.Address,
+	}
+
+	return &AlpenhornConfig{
+		Coordinator: coordinator,
+		PKGs:        pkgs,
+		Mixers:      mixers,
+		CDN:         cdn,
+	}, nil
 }
 
-type Config struct {
-	ServerMap `mapstructure:"servers"`
+func (conf *globalConfig) VuvuzelaConfig() (*VuvuzelaConfig, error) {
+	if conf.Vuvuzela == nil {
+		return nil, errors.New("no vuvuzela config")
+	}
 
-	*AlpenhornSettings `mapstructure:"alpenhorn"`
+	coordinatorKey, err := conf.getKey(conf.Vuvuzela.Coordinator.Key)
+	if err != nil {
+		return nil, err
+	}
+	coordinator := Coordinator{
+		Key:           coordinatorKey,
+		ClientAddress: conf.Vuvuzela.Coordinator.ClientAddress,
+	}
+
+	mixers := make([]Mixer, len(conf.Vuvuzela.Mixer))
+	for i, mixerConf := range conf.Vuvuzela.Mixer {
+		key, err := conf.getKey(mixerConf.Key)
+		if err != nil {
+			return nil, err
+		}
+		mixers[i] = Mixer{
+			Key:     key,
+			Address: mixerConf.Address,
+		}
+	}
+
+	return &VuvuzelaConfig{
+		Coordinator: coordinator,
+		Mixers:      mixers,
+	}, nil
 }
 
-type AlpenhornSettings struct {
-	// These strings are keys into a ServerMap.
+func decodeGlobalConfig(data []byte) (GlobalConfig, error) {
+	globalConf := new(globalConfig)
+	err := toml.Unmarshal(data, globalConf)
+	if err != nil {
+		return nil, err
+	}
 
-	PKGServers []string
-	Mixers     []string
-
-	CDN         string
-	EntryServer string
+	return globalConf, nil
 }
 
-func ReadFile(path string) (*Config, error) {
+func ReadGlobalConfigFile(path string) (GlobalConfig, error) {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	conf := new(Config)
-	err = toml.Unmarshal(data, conf)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing %q: %s", path, err)
-	}
-
-	srvlists := [][]string{
-		conf.PKGServers,
-		conf.Mixers,
-		[]string{conf.CDN},
-	}
-	for _, srvlist := range srvlists {
-		for _, srv := range srvlist {
-			info := conf.ServerMap[srv]
-			if info == nil {
-				return nil, fmt.Errorf("server %q not configured", srv)
-			}
-		}
-	}
-
-	return conf, nil
-}
-
-func (c *Config) PrevMixer(srv string) *ServerInfo {
-	ix := index(c.Mixers, srv)
-	if ix < 0 {
-		return nil
-	}
-	if ix == 0 {
-		return c.ServerMap[c.EntryServer]
-	}
-	prev := c.Mixers[ix-1]
-	return c.ServerMap[prev]
-}
-
-func (c *Config) NextMixer(srv string) *ServerInfo {
-	ix := index(c.Mixers, srv)
-	if ix == -1 || ix >= len(c.Mixers)-1 {
-		return nil
-	}
-	next := c.Mixers[ix+1]
-	return c.ServerMap[next]
-}
-
-func (c *Config) MixerPosition(srv string) int {
-	return index(c.Mixers, srv)
-}
-
-func index(list []string, item string) int {
-	for i, s := range list {
-		if s == item {
-			return i
-		}
-	}
-	return -1
+	return decodeGlobalConfig(data)
 }

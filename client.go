@@ -18,7 +18,6 @@ import (
 
 	"golang.org/x/crypto/ed25519"
 
-	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/keywheel"
@@ -109,16 +108,6 @@ type Client struct {
 	dialingConn     typesocket.Conn
 
 	lastDialingRound uint32 // updated atomically
-}
-
-// Bootstrap initializes the connection settings from a global configuration.
-func (c *ConnectionSettings) Bootstrap(s *config.AlpenhornSettings, servers config.ServerMap) {
-	c.EntryAddr = servers.GetServer(s.EntryServer).Address
-	pkgs := servers.GetServers(s.PKGServers)
-	c.PKGAddrs = pkgs.Addrs()
-	c.PKGKeys = pkgs.Keys()
-	c.Mixers = servers.GetServers(s.Mixers).Keys()
-	c.CDNKey = servers.GetServer(s.CDN).PublicKey
 }
 
 func regid(serverKey ed25519.PublicKey, username string) string {

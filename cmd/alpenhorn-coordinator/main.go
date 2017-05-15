@@ -133,9 +133,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	globalConf, err := config.ReadFile(*globalConfPath)
+	globalConf, err := config.ReadGlobalConfigFile(*globalConfPath)
 	if err != nil {
 		log.Fatal(err)
+	}
+	alpConf, err := globalConf.AlpenhornConfig()
+	if err != nil {
+		log.Fatalf("error reading alpenhorn config from %q: %s", *globalConfPath, err)
+	}
+	if len(alpConf.Mixers) == 0 {
+		log.Fatalf("no mix servers defined in global config: %s", *globalConfPath)
+	}
+	if len(alpConf.PKGs) == 0 {
+		log.Fatalf("no PKG servers defined in global config: %s", *globalConfPath)
 	}
 
 	data, err := ioutil.ReadFile(*confPath)
@@ -148,32 +158,32 @@ func main() {
 		log.Fatalf("error parsing config %q: %s", *confPath, err)
 	}
 
-	if len(globalConf.Mixers) == 0 {
-		log.Fatalf("no mix servers defined in global conf: %s", *globalConfPath)
-	}
-	if len(globalConf.PKGServers) == 0 {
-		log.Fatalf("no PKG servers defined in global conf: %s", *globalConfPath)
-	}
-
-	mixConns := make([]*vrpc.Client, len(globalConf.Mixers))
-	for i, info := range globalConf.GetServers(globalConf.Mixers) {
+	mixConns := make([]*vrpc.Client, len(alpConf.Mixers))
+	for i, mixer := range alpConf.Mixers {
+		if mixer.Key == nil || mixer.Address == "" {
+			log.Fatalf("mixer %d is missing a key or address", i+1)
+		}
 		numConns := 1
 		if i == 0 {
 			numConns = runtime.NumCPU()
 		}
 
-		log.Printf("connecting to mixer: %s", info.Address)
-		client, err := vrpc.Dial("tcp", info.Address, info.PublicKey, conf.PrivateKey, numConns)
+		log.Printf("connecting to mixer: %s", mixer.Address)
+		client, err := vrpc.Dial("tcp", mixer.Address, mixer.Key, conf.PrivateKey, numConns)
 		if err != nil {
 			log.Fatalf("vrpc.Dial: %s", err)
 		}
 		mixConns[i] = client
 	}
 
-	pkgConns := make([]*vrpc.Client, len(globalConf.PKGServers))
-	for i, info := range globalConf.GetServers(globalConf.PKGServers) {
-		client, err := vrpc.Dial("tcp", info.EntryAddress, info.PublicKey, conf.PrivateKey, 1)
-		log.Printf("connecting to PKG: %s", info.EntryAddress)
+	pkgConns := make([]*vrpc.Client, len(alpConf.PKGs))
+	for i, pkg := range alpConf.PKGs {
+		if pkg.Key == nil || pkg.CoordinatorAddress == "" {
+			log.Fatalf("PKG %d is missing a key or address", i+1)
+		}
+
+		client, err := vrpc.Dial("tcp", pkg.CoordinatorAddress, pkg.Key, conf.PrivateKey, 1)
+		log.Printf("connecting to PKG: %s", pkg.CoordinatorAddress)
 		if err != nil {
 			log.Fatalf("vrpc.Dial: %s", err)
 		}

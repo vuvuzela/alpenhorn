@@ -105,9 +105,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	globalConf, err := config.ReadFile(*globalConfPath)
+	globalConf, err := config.ReadGlobalConfigFile(*globalConfPath)
 	if err != nil {
 		log.Fatal(err)
+	}
+	alpConf, err := globalConf.AlpenhornConfig()
+	if err != nil {
+		log.Fatalf("error reading alpenhorn config from %q: %s", *globalConfPath, err)
+	}
+	coordinatorKey := alpConf.Coordinator.Key
+	if coordinatorKey == nil {
+		log.Fatalf("no alpenhorn coordinator key specified in global config")
 	}
 
 	data, err := ioutil.ReadFile(*confPath)
@@ -146,13 +154,8 @@ func main() {
 		}
 	}()
 
-	entryServer := globalConf.GetServer(globalConf.EntryServer)
-	if entryServer == nil {
-		log.Fatalf("no entry server defined in global config")
-	}
-
 	rpcServer := new(vrpc.Server)
-	if err := rpcServer.Register(entryServer.PublicKey, "PKG", (*pkg.CoordinatorService)(pkgServer)); err != nil {
+	if err := rpcServer.Register(coordinatorKey, "PKG", (*pkg.CoordinatorService)(pkgServer)); err != nil {
 		log.Fatalf("vrpc.Register: %s", err)
 	}
 	err = rpcServer.ListenAndServe(conf.EntryListenAddr, conf.PrivateKey)

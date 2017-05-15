@@ -96,9 +96,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	globalConf, err := config.ReadFile(*globalConfPath)
+	globalConf, err := config.ReadGlobalConfigFile(*globalConfPath)
 	if err != nil {
 		log.Fatal(err)
+	}
+	alpConf, err := globalConf.AlpenhornConfig()
+	if err != nil {
+		log.Fatalf("error reading alpenhorn config from %q: %s", *globalConfPath, err)
+	}
+	mixers := alpConf.Mixers
+	if len(mixers) == 0 {
+		log.Fatal("no alpenhorn mixers defined in global config")
+	}
+	lastMixerKey := mixers[len(mixers)-1].Key
+	if lastMixerKey == nil {
+		log.Fatal("last alpenhorn mixer has no key")
 	}
 
 	data, err := ioutil.ReadFile(*confPath)
@@ -110,9 +122,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("error parsing config %q: %s", *confPath, err)
 	}
-
-	mixers := globalConf.Mixers
-	lastMixerKey := globalConf.GetServer(mixers[len(mixers)-1]).PublicKey
 
 	server, err := cdn.New(conf.DBPath, lastMixerKey)
 	if err != nil {
