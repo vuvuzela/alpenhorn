@@ -42,11 +42,20 @@ type serverConn struct {
 	hub  *Hub
 	conn *websocket.Conn
 	send chan []byte
+
+	mu     sync.Mutex
+	closed bool
 }
 
 // readPump pumps messages from the websocket connection to the hub.
 func (c *serverConn) readPump() {
 	defer func() {
+		c.mu.Lock()
+		if !c.closed {
+			c.closed = true
+			close(c.send)
+		}
+		c.mu.Unlock()
 		c.hub.unregister(c)
 		c.conn.Close()
 	}()
@@ -120,10 +129,20 @@ func (c *serverConn) Send(msgID string, v interface{}) error {
 		return err
 	}
 
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return errors.New("connection closed")
+	}
+
 	select {
 	case c.send <- msg:
+		c.mu.Unlock()
 		return nil
 	default:
+		c.closed = true
+		close(c.send)
+		c.mu.Unlock()
 		c.hub.unregister(c)
 		return errors.New("failed to send")
 	}
@@ -183,7 +202,6 @@ func (h *Hub) unregister(c *serverConn) {
 	_, ok := h.conns[c]
 	if ok {
 		delete(h.conns, c)
-		close(c.send)
 	}
 	h.mu.Unlock()
 }
@@ -198,12 +216,20 @@ func (h *Hub) Broadcast(msgID string, v interface{}) error {
 	defer h.mu.Unlock()
 
 	for conn := range h.conns {
+		conn.mu.Lock()
+		if conn.closed {
+			conn.mu.Unlock()
+			continue
+		}
+
 		select {
 		case conn.send <- msg:
 		default:
 			delete(h.conns, conn)
+			conn.closed = true
 			close(conn.send)
 		}
+		conn.mu.Unlock()
 	}
 	return nil
 }
