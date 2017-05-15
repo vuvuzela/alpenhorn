@@ -17,11 +17,11 @@ import (
 	log "github.com/Sirupsen/logrus"
 
 	"vuvuzela.io/alpenhorn/errors"
-	"vuvuzela.io/alpenhorn/internal/ioutil2"
 	"vuvuzela.io/alpenhorn/mixnet"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/alpenhorn/typesocket"
 	"vuvuzela.io/alpenhorn/vrpc"
+	"vuvuzela.io/internal/ioutil2"
 )
 
 // Server is the coordinator (entry) server for the add-friend or dialing

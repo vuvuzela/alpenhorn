@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"io/ioutil"
 
-	"vuvuzela.io/alpenhorn/internal/ioutil2"
 	"vuvuzela.io/alpenhorn/pkg"
+	"vuvuzela.io/internal/ioutil2"
 
 	"golang.org/x/crypto/ed25519"
 )
