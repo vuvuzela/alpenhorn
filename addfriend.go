@@ -11,8 +11,8 @@ import (
 	"encoding/hex"
 	"sync/atomic"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/davidlazar/go-crypto/encoding/base32"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/box"
 

@@ -15,7 +15,7 @@ import (
 
 	"golang.org/x/crypto/ed25519"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 
 	"vuvuzela.io/alpenhorn/cdn"
 	"vuvuzela.io/alpenhorn/config"
