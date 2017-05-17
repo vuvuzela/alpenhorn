@@ -6,10 +6,10 @@ package alpenhorn
 
 import (
 	"crypto/rand"
-	"log"
 	"sync/atomic"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
+	log "github.com/sirupsen/logrus"
 
 	"vuvuzela.io/alpenhorn/bloom"
 	"vuvuzela.io/alpenhorn/coordinator"
