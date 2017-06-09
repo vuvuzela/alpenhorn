@@ -44,6 +44,10 @@ func TestServer(t *testing.T) {
 			t.Error(err)
 			return
 		}
+		if err := conn.Handshake(); err != nil {
+			t.Error(err)
+			return
+		}
 		t.Logf("client writing")
 		if _, err := conn.Write([]byte("Greetings")); err != nil {
 			t.Error(err)
@@ -78,8 +82,8 @@ func TestServer(t *testing.T) {
 			return
 		}
 		t.Logf("server verifying")
-		ok := Verify(clientPublicKey, state.PeerCertificates[0], time.Now())
-		if !ok {
+		peerKey := GetSigningKey(state.PeerCertificates[0])
+		if !bytes.Equal(peerKey, clientPublicKey) {
 			t.Error("edtls verification failed")
 			return
 		}
@@ -141,8 +145,8 @@ func TestExpiration(t *testing.T) {
 			}
 			clientCert := state.PeerCertificates[0]
 
-			ok := Verify(clientPublicKey, clientCert, time.Now())
-			if !ok {
+			peerKey := GetSigningKey(clientCert)
+			if !bytes.Equal(peerKey, clientPublicKey) {
 				t.Fatalf("edtls verification failed with key %q", base64.RawURLEncoding.EncodeToString(clientPublicKey))
 			}
 

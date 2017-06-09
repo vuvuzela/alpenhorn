@@ -61,19 +61,19 @@ func GetSigningKey(cert *x509.Certificate) ed25519.PublicKey {
 
 // Verify a vouch as offered by the TLS peer.
 // Returns false if cert has expired relative to now.
-func Verify(publicKey ed25519.PublicKey, cert *x509.Certificate, now time.Time) bool {
-	_, sig := findSig(cert)
+func verify(cert *x509.Certificate, now time.Time) (ed25519.PublicKey, bool) {
+	key, sig := findSig(cert)
 	if sig == nil {
-		return false
+		return nil, false
 	}
 
 	if now.After(cert.NotAfter) {
-		return false
+		return nil, false
 	}
 
 	tlsPubDer, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
 	if err != nil {
-		return false
+		return nil, false
 	}
 	msg := make([]byte, 0, len(prefix)+8+len(tlsPubDer))
 	msg = append(msg, prefix...)
@@ -82,5 +82,9 @@ func Verify(publicKey ed25519.PublicKey, cert *x509.Certificate, now time.Time) 
 	msg = append(msg, timestamp[:]...)
 	msg = append(msg, tlsPubDer...)
 
-	return ed25519.Verify(publicKey, msg, sig[:])
+	ok := ed25519.Verify(key, msg, sig[:])
+	if ok {
+		return key, true
+	}
+	return nil, false
 }

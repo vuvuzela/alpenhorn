@@ -114,18 +114,16 @@ func TestVerify(t *testing.T) {
 		},
 	}
 	now := time.Date(2014, 12, 13, 14, 15, 15, 15, time.UTC)
-	ok := Verify(signPub, &cert, now)
+	peerKey, ok := verify(&cert, now)
 	if !ok {
 		t.Fatalf("unexpected negative result from Verify")
+	}
+	if !bytes.Equal(peerKey, signPub) {
+		t.Fatalf("signed with wrong key")
 	}
 }
 
 func TestVerifyMissingSignature(t *testing.T) {
-	signPub, _, err := ed25519.GenerateKey(fakeRand{})
-	if err != nil {
-		t.Fatalf("unexpected error from ed25519.GenerateKey: %v", err)
-	}
-
 	tlsPriv, err := ecdsa.GenerateKey(elliptic.P256(), fakeRand{})
 	if err != nil {
 		t.Fatalf("unexpected error from ecdsa.GenerateKey: %v", err)
@@ -137,7 +135,7 @@ func TestVerifyMissingSignature(t *testing.T) {
 		NotAfter:  time.Date(2014, 12, 13, 14, 15, 16, 17, time.UTC),
 	}
 	now := time.Date(2014, 12, 13, 14, 15, 15, 15, time.UTC)
-	ok := Verify(signPub, &cert, now)
+	_, ok := verify(&cert, now)
 	if ok {
 		t.Fatalf("unexpected positive from Verify")
 	}
@@ -165,7 +163,7 @@ func TestVerifyBadSignature(t *testing.T) {
 		Extensions: []pkix.Extension{
 			{
 				Id: asn1.ObjectIdentifier{1, 2, 840, 113556, 1, 8000, 2554, 31830, 5190, 18203, 20240, 41147, 7688498, 2373901},
-				Value: []byte{
+				Value: append(pubKey, []byte{
 					// sig
 					0x81, 0x1b, 0xf8, 0xef, 0x30, 0xf3, 0x2b, 0x6d,
 					0x5f, 0x41, 0xa2, 0x04, 0xff, 0x5a, 0xb5, 0xd0,
@@ -175,22 +173,18 @@ func TestVerifyBadSignature(t *testing.T) {
 					0xc0, 0xcd, 0x85, 0xda, 0x0e, 0xf4, 0x8c, 0x1b,
 					0xc0, 0xed, 0xf8, 0xd3, 0x10, 0xa7, 0xa0, 0x4e,
 					0x34, 0xed, 0x83, 0x57, 0x41, 0x49, 0xbe, 0x07, /* evil here */
-				},
+				}...),
 			},
 		},
 	}
 	now := time.Date(2014, 12, 13, 14, 15, 15, 15, time.UTC)
-	ok := Verify(pubKey, &cert, now)
+	_, ok := verify(&cert, now)
 	if ok {
 		t.Fatalf("unexpected positive from Verify")
 	}
 }
 
 func TestVerifyExpired(t *testing.T) {
-	signPub, _, err := ed25519.GenerateKey(fakeRand{})
-	if err != nil {
-		t.Fatalf("unexpected error from ed25519.GenerateKey: %v", err)
-	}
 	tlsPriv, err := ecdsa.GenerateKey(elliptic.P256(), fakeRand{})
 	if err != nil {
 		t.Fatalf("unexpected error from ecdsa.GenerateKey: %v", err)
@@ -224,7 +218,7 @@ func TestVerifyExpired(t *testing.T) {
 		},
 	}
 	now := time.Date(2014, 12, 13, 14, 15, 16, 18, time.UTC)
-	ok := Verify(signPub, &cert, now)
+	_, ok := verify(&cert, now)
 	if ok {
 		t.Fatalf("unexpected positive from Verify")
 	}

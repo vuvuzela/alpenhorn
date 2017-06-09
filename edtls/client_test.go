@@ -31,10 +31,10 @@ func TestClientVerificationFailure(t *testing.T) {
 	}()
 
 	c, err := Client(client, testKeyPub, nil)
-	if err == nil {
-		c.Close()
-		t.Fatal("expected an error")
+	if err != nil {
+		t.Fatal(err)
 	}
+	err = c.Handshake()
 	if err != ErrVerificationFailed {
 		t.Fatalf("expected ErrVerificationFailed, got %T: %v", err, err)
 	}

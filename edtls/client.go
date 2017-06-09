@@ -1,14 +1,16 @@
 package edtls
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"net"
 	"time"
 
 	"golang.org/x/crypto/ed25519"
+
+	"vuvuzela.io/alpenhorn/errors"
 )
 
 var (
@@ -17,73 +19,62 @@ var (
 )
 
 func Dial(network, addr string, theirKey ed25519.PublicKey, myKey ed25519.PrivateKey) (*tls.Conn, error) {
-	config, err := newTLSClientConfig(myKey)
+	config, err := newTLSClientConfig(myKey, theirKey)
 	if err != nil {
 		return nil, err
 	}
 
-	conn, err := tls.Dial(network, addr, config)
-	if err != nil {
-		return nil, err
-	}
-
-	s := conn.ConnectionState()
-	if len(s.PeerCertificates) == 0 {
-		// servers are not supposed to be able to do that
-		_ = conn.Close()
-		return nil, ErrNoPeerCertificates
-	}
-
-	ok := Verify(theirKey, s.PeerCertificates[0], time.Now())
-	if !ok {
-		_ = conn.Close()
-		return nil, ErrVerificationFailed
-	}
-
-	return conn, nil
+	return tls.Dial(network, addr, config)
 }
 
 func Client(rawConn net.Conn, theirKey ed25519.PublicKey, myKey ed25519.PrivateKey) (*tls.Conn, error) {
-	config, err := newTLSClientConfig(myKey)
+	config, err := newTLSClientConfig(myKey, theirKey)
 	if err != nil {
 		return nil, err
 	}
 
 	conn := tls.Client(rawConn, config)
-	if err := conn.Handshake(); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-
-	s := conn.ConnectionState()
-	if len(s.PeerCertificates) == 0 {
-		// servers are not supposed to be able to do that
-		_ = conn.Close()
-		return nil, ErrNoPeerCertificates
-	}
-
-	ok := Verify(theirKey, s.PeerCertificates[0], time.Now())
-	if !ok {
-		_ = conn.Close()
-		return nil, ErrVerificationFailed
-	}
-
 	return conn, nil
 }
 
-func newTLSClientConfig(key ed25519.PrivateKey) (*tls.Config, error) {
+func newTLSClientConfig(myKey ed25519.PrivateKey, peerKey ed25519.PublicKey) (*tls.Config, error) {
 	var config = &tls.Config{
 		RootCAs:            x509.NewCertPool(),
 		ClientAuth:         tls.RequestClientCert,
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: true,
+
+		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return ErrNoPeerCertificates
+			}
+
+			if len(rawCerts) != 1 {
+				return errors.New("too many peer certificates: %d", len(rawCerts))
+			}
+
+			cert, err := x509.ParseCertificate(rawCerts[0])
+			if err != nil {
+				return errors.Wrap(err, "x509.ParseCertificate")
+			}
+
+			theirKey, ok := verify(cert, time.Now())
+			if !ok {
+				return ErrVerificationFailed
+			}
+			if !bytes.Equal(theirKey, peerKey) {
+				return ErrVerificationFailed
+			}
+
+			return nil
+		},
 	}
 
-	if key == nil {
+	if myKey == nil {
 		return config, nil
 	}
 
-	certDER, certKey, err := newSelfSignedCert(key)
+	certDER, certKey, err := newSelfSignedCert(myKey)
 	if err != nil {
 		return nil, fmt.Errorf("error generating self-signed certificate: %s", err)
 	}
