@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/gob"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -16,13 +17,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/davidlazar/go-crypto/encoding/base32"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/edtls"
 )
 
 func TestCDN(t *testing.T) {
-	clientPub, clientPriv, _ := ed25519.GenerateKey(rand.Reader)
+	coordinatorPub, coordinatorPriv, _ := ed25519.GenerateKey(rand.Reader)
 	cdnPub, cdnPriv, _ := ed25519.GenerateKey(rand.Reader)
 
 	dir, err := ioutil.TempDir("", "TestCDN")
@@ -35,7 +37,7 @@ func TestCDN(t *testing.T) {
 	deleteExpiredTickRate = 1 * time.Second
 
 	dbPath := filepath.Join(dir, "cdn.db")
-	cdn, err := New(dbPath, clientPub)
+	cdn, err := New(dbPath, coordinatorPub)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,11 +61,20 @@ func TestCDN(t *testing.T) {
 		client := &http.Client{
 			Transport: &http.Transport{
 				DialTLS: func(network, addr string) (net.Conn, error) {
-					return edtls.Dial(network, addr, cdnPub, clientPriv)
+					return edtls.Dial(network, addr, cdnPub, coordinatorPriv)
 				},
 			},
 		}
-		resp, err := client.Post("https://127.0.0.1:8080/put?bucket=foo&prefix=42", "", buf)
+		nbURL := fmt.Sprintf("https://%s/newbucket?bucket=%s&uploader=%s", "127.0.0.1:8080", "foo/42", base32.EncodeToString(coordinatorPub))
+		resp, err := client.Post(nbURL, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			msg, _ := ioutil.ReadAll(resp.Body)
+			t.Fatalf("newbucket failed: %s: %s", resp.Status, msg)
+		}
+		resp, err = client.Post("https://127.0.0.1:8080/put?bucket=foo/42", "", buf)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -85,7 +96,7 @@ func TestCDN(t *testing.T) {
 				},
 			},
 		}
-		resp, err := client.Get("https://127.0.0.1:8080/get?bucket=foo&prefix=42&key=2")
+		resp, err := client.Get("https://127.0.0.1:8080/get?bucket=foo/42&key=2")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +122,7 @@ func TestCDN(t *testing.T) {
 				},
 			},
 		}
-		resp, err := client.Get("https://127.0.0.1:8080/get?bucket=foo&prefix=42&key=2")
+		resp, err := client.Get("https://127.0.0.1:8080/get?bucket=foo/42&key=2")
 		if err != nil {
 			t.Fatal(err)
 		}

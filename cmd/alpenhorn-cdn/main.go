@@ -13,28 +13,27 @@ import (
 	"os"
 	"text/template"
 
+	"github.com/davidlazar/go-crypto/encoding/base32"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 
-	log "github.com/sirupsen/logrus"
-
 	"vuvuzela.io/alpenhorn/cdn"
-	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
 	"vuvuzela.io/crypto/rand"
 )
 
 var (
-	confPath       = flag.String("conf", "", "config file")
-	globalConfPath = flag.String("global", "", "global config file")
-	doinit         = flag.Bool("init", false, "create config file")
+	confPath = flag.String("conf", "", "config file")
+	doinit   = flag.Bool("init", false, "create config file")
 )
 
 type Config struct {
-	DBPath     string
-	ListenAddr string
-	PublicKey  ed25519.PublicKey
-	PrivateKey ed25519.PrivateKey
+	DBPath         string
+	ListenAddr     string
+	PublicKey      ed25519.PublicKey
+	PrivateKey     ed25519.PrivateKey
+	CoordinatorKey ed25519.PublicKey
 }
 
 var funcMap = template.FuncMap{
@@ -48,6 +47,8 @@ listenAddr = {{.ListenAddr | printf "%q" }}
 
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
+
+coordinatorKey = {{.CoordinatorKey | base32 | printf "%q" }}
 `
 
 func writeNewConfig() {
@@ -86,31 +87,9 @@ func main() {
 		return
 	}
 
-	if *globalConfPath == "" {
-		fmt.Println("specify global config file with -global")
-		os.Exit(1)
-	}
-
 	if *confPath == "" {
 		fmt.Println("specify config file with -conf")
 		os.Exit(1)
-	}
-
-	globalConf, err := config.ReadGlobalConfigFile(*globalConfPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	alpConf, err := globalConf.AlpenhornConfig()
-	if err != nil {
-		log.Fatalf("error reading alpenhorn config from %q: %s", *globalConfPath, err)
-	}
-	mixers := alpConf.Mixers
-	if len(mixers) == 0 {
-		log.Fatal("no alpenhorn mixers defined in global config")
-	}
-	lastMixerKey := mixers[len(mixers)-1].Key
-	if lastMixerKey == nil {
-		log.Fatal("last alpenhorn mixer has no key")
 	}
 
 	data, err := ioutil.ReadFile(*confPath)
@@ -123,7 +102,14 @@ func main() {
 		log.Fatalf("error parsing config %q: %s", *confPath, err)
 	}
 
-	server, err := cdn.New(conf.DBPath, lastMixerKey)
+	if conf.ListenAddr == "" {
+		log.Fatal("empty listen address in config")
+	}
+	if len(conf.CoordinatorKey) != ed25519.PublicKeySize {
+		log.Fatalf("invalid coordinator key in config: %q", base32.EncodeToString(conf.CoordinatorKey))
+	}
+
+	server, err := cdn.New(conf.DBPath, conf.CoordinatorKey)
 	if err != nil {
 		log.Fatal(err)
 	}
