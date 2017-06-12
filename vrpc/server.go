@@ -6,12 +6,10 @@ package vrpc
 
 import (
 	"crypto/tls"
-	"encoding/base64"
 	"errors"
 	"net"
 	"net/rpc"
 	"sync"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
@@ -54,29 +52,32 @@ func (s *Server) Serve(listener net.Listener, myKey ed25519.PrivateKey) error {
 		conn := rawConn.(*tls.Conn)
 
 		if err := conn.Handshake(); err != nil {
+			log.Errorf("vrpc.Serve: TLS handshake failed: %s", err)
 			conn.Close()
 			continue
 		}
 		state := conn.ConnectionState()
 		if !state.HandshakeComplete {
 			log.Errorf("vrpc.Serve: TLS handshake did not complete")
+			conn.Close()
 			continue
 		}
 
 		if len(state.PeerCertificates) == 0 {
 			log.Errorf("vrpc.Serve: no TLS peer certificates")
+			conn.Close()
 			continue
 		}
 		clientCert := state.PeerCertificates[0]
 		clientKey := edtls.GetSigningKey(clientCert)
 
-		ok := edtls.Verify(clientKey, clientCert, time.Now())
-		if !ok {
-			log.Errorf("vrpc.Serve: edtls verification failed with key %q", base64.RawURLEncoding.EncodeToString(clientKey))
+		if clientKey == nil {
+			conn.Close()
 			continue
 		}
 
 		if s.servers == nil {
+			conn.Close()
 			continue
 		}
 
