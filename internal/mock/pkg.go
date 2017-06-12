@@ -15,27 +15,22 @@ import (
 	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/internal/pg"
 	"vuvuzela.io/alpenhorn/pkg"
-	"vuvuzela.io/alpenhorn/vrpc"
 	"vuvuzela.io/crypto/rand"
 )
 
 type PKG struct {
-	Key        ed25519.PublicKey
-	ClientAddr string
-	EntryAddr  string
+	pkg.PublicServerConfig
 
 	dbName     string
 	pkgServer  *pkg.Server
 	httpServer *http.Server
-	rpcServer  *vrpc.Server
 }
 
 func (p *PKG) Close() error {
-	err1 := p.rpcServer.Close()
-	err2 := p.httpServer.Close()
-	err3 := p.pkgServer.Close()
+	err1 := p.httpServer.Close()
+	err2 := p.pkgServer.Close()
 	pg.Dropdb(p.dbName)
-	return firstError(err1, err2, err3)
+	return firstError(err1, err2)
 }
 
 func firstError(errors ...error) error {
@@ -47,14 +42,14 @@ func firstError(errors ...error) error {
 	return nil
 }
 
-func LaunchPKG(entryKey ed25519.PublicKey, sendMail pkg.SendMailHandler) (*PKG, error) {
+func LaunchPKG(coordinatorKey ed25519.PublicKey, sendMail pkg.SendMailHandler) (*PKG, error) {
 	publicKey, privateKey, _ := ed25519.GenerateKey(rand.Reader)
 
-	clientListener, err := edtls.Listen("tcp", "localhost:0", privateKey)
+	listener, err := edtls.Listen("tcp", "localhost:0", privateKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "edtls.Listen")
 	}
-	clientAddr := clientListener.Addr().String()
+	addr := listener.Addr().String()
 
 	id := make([]byte, 8)
 	rand.Read(id)
@@ -62,8 +57,9 @@ func LaunchPKG(entryKey ed25519.PublicKey, sendMail pkg.SendMailHandler) (*PKG, 
 	pg.Createdb(dbName)
 
 	config := &pkg.Config{
-		SigningKey: privateKey,
-		DBName:     dbName,
+		SigningKey:     privateKey,
+		DBName:         dbName,
+		CoordinatorKey: coordinatorKey,
 
 		SendVerificationEmail: sendMail,
 	}
@@ -76,36 +72,20 @@ func LaunchPKG(entryKey ed25519.PublicKey, sendMail pkg.SendMailHandler) (*PKG, 
 	}
 	httpServer.SetKeepAlivesEnabled(false)
 	go func() {
-		err := httpServer.Serve(clientListener)
+		err := httpServer.Serve(listener)
 		if err != http.ErrServerClosed {
 			log.Fatalf("http.Serve: %s", err)
 		}
 	}()
 
-	entryListener, err := edtls.Listen("tcp", "localhost:0", privateKey)
-	if err != nil {
-		return nil, errors.Wrap(err, "edtls.Listen")
-	}
-	entryAddr := entryListener.Addr().String()
-	rpcServer := new(vrpc.Server)
-	if err := rpcServer.Register(entryKey, "PKG", (*pkg.CoordinatorService)(pkgServer)); err != nil {
-		return nil, errors.Wrap(err, "vrpc.Register")
-	}
-	go func() {
-		err := rpcServer.Serve(entryListener, privateKey)
-		if err != vrpc.ErrServerClosed {
-			log.Fatalf("rpc.Serve: %s", err)
-		}
-	}()
-
 	return &PKG{
-		Key:        publicKey,
-		ClientAddr: clientAddr,
-		EntryAddr:  entryAddr,
+		PublicServerConfig: pkg.PublicServerConfig{
+			Key:     publicKey,
+			Address: addr,
+		},
 
 		dbName:     dbName,
 		pkgServer:  pkgServer,
 		httpServer: httpServer,
-		rpcServer:  rpcServer,
 	}, nil
 }

@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -22,8 +23,9 @@ import (
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/ed25519"
 
+	"vuvuzela.io/alpenhorn/edhttp"
+	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/errors"
-	"vuvuzela.io/alpenhorn/vrpc"
 	"vuvuzela.io/crypto/bls"
 	"vuvuzela.io/crypto/ibe"
 )
@@ -36,8 +38,9 @@ type Server struct {
 	mu     sync.Mutex
 	rounds map[uint32]*roundState
 
-	privateKey ed25519.PrivateKey
-	publicKey  ed25519.PublicKey
+	privateKey     ed25519.PrivateKey
+	publicKey      ed25519.PublicKey
+	coordinatorKey ed25519.PublicKey
 
 	sendVerificationEmail SendMailHandler
 }
@@ -59,6 +62,9 @@ type Config struct {
 
 	// SigningKey is the PKG server's long-term signing key.
 	SigningKey ed25519.PrivateKey
+
+	// CoordinatorKey is the key that's authorized to start new PKG rounds.
+	CoordinatorKey ed25519.PublicKey
 
 	// SendVerificationEmail is invoked by the PKG to verify the identity
 	// of a user when they register. This function should send an email
@@ -117,11 +123,12 @@ func NewServer(conf *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		db:         db,
-		userStmt:   stmt,
-		rounds:     make(map[uint32]*roundState),
-		privateKey: conf.SigningKey,
-		publicKey:  conf.SigningKey.Public().(ed25519.PublicKey),
+		db:             db,
+		userStmt:       stmt,
+		rounds:         make(map[uint32]*roundState),
+		privateKey:     conf.SigningKey,
+		publicKey:      conf.SigningKey.Public().(ed25519.PublicKey),
+		coordinatorKey: conf.CoordinatorKey,
 
 		sendVerificationEmail: conf.SendVerificationEmail,
 	}
@@ -141,22 +148,52 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		srv.registerHandler(w, r)
 	case "/verify":
 		srv.verifyHandler(w, r)
+	case "/commit":
+		srv.commitHandler(w, r)
+	case "/reveal":
+		srv.revealHandler(w, r)
 	default:
 		http.NotFound(w, r)
 	}
 }
 
-type CoordinatorService Server
+func (srv *Server) authorized(key ed25519.PublicKey, w http.ResponseWriter, req *http.Request) bool {
+	if len(req.TLS.PeerCertificates) == 0 {
+		httpError(w, errorf(ErrUnauthorized, "no peer tls certificate"))
+		return false
+	}
+	peerKey := edtls.GetSigningKey(req.TLS.PeerCertificates[0])
+	if !bytes.Equal(peerKey, key) {
+		httpError(w, errorf(ErrUnauthorized, "peer key is not authorized"))
+		return false
+	}
+	return true
+}
 
-type CommitReply struct {
+type commitArgs struct {
+	Round uint32
+}
+
+type commitReply struct {
 	Commitment []byte
 }
 
-func (srv *CoordinatorService) Commit(round uint32, reply *CommitReply) error {
-	srv.mu.Lock()
-	defer srv.mu.Unlock()
+func (srv *Server) commitHandler(w http.ResponseWriter, req *http.Request) {
+	if !srv.authorized(srv.coordinatorKey, w, req) {
+		return
+	}
 
+	args := new(commitArgs)
+	err := json.NewDecoder(req.Body).Decode(args)
+	if err != nil {
+		httpError(w, errorf(ErrBadRequestJSON, "%s", err))
+		return
+	}
+	round := args.Round
+
+	srv.mu.Lock()
 	st, ok := srv.rounds[round]
+	srv.mu.Unlock()
 	if !ok {
 		ibePub, ibePriv := ibe.Setup(rand.Reader)
 
@@ -171,17 +208,28 @@ func (srv *CoordinatorService) Commit(round uint32, reply *CommitReply) error {
 			blsPublicKey:     blsPub,
 			blsPrivateKey:    blsPriv,
 		}
+		srv.mu.Lock()
 		srv.rounds[round] = st
+		srv.mu.Unlock()
 	}
-	reply.Commitment = commitTo(st.masterPublicKey, st.blsPublicKey)
 
+	srv.mu.Lock()
 	for r, _ := range srv.rounds {
 		if r < round-1 {
 			delete(srv.rounds, r)
 		}
 	}
+	srv.mu.Unlock()
 
-	return nil
+	reply := &commitReply{
+		Commitment: commitTo(st.masterPublicKey, st.blsPublicKey),
+	}
+	bs, err := json.Marshal(reply)
+	if err != nil {
+		panic(err)
+	}
+
+	w.Write(bs)
 }
 
 func commitTo(ibeKey *ibe.MasterPublicKey, blsKey *bls.PublicKey) []byte {
@@ -191,7 +239,7 @@ func commitTo(ibeKey *ibe.MasterPublicKey, blsKey *bls.PublicKey) []byte {
 	return h[:]
 }
 
-type RevealArgs struct {
+type revealArgs struct {
 	Round       uint32
 	Commitments map[string][]byte // map from hex(signingPublicKey) -> commitment
 }
@@ -204,64 +252,80 @@ type RevealReply struct {
 	Signature []byte
 }
 
-func (srv *CoordinatorService) Reveal(args *RevealArgs, reply *RevealReply) error {
+func (srv *Server) revealHandler(w http.ResponseWriter, req *http.Request) {
+	if !srv.authorized(srv.coordinatorKey, w, req) {
+		return
+	}
+
+	args := new(revealArgs)
+	err := json.NewDecoder(req.Body).Decode(args)
+	if err != nil {
+		httpError(w, errorf(ErrBadRequestJSON, "%s", err))
+		return
+	}
+
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
 	st, ok := srv.rounds[args.Round]
 	if !ok {
-		return errors.New("round %d not found", args.Round)
+		httpError(w, errorf(ErrRoundNotFound, "round %d", args.Round))
+		return
 	}
 
-	if len(st.revealSignature) > 0 {
-		reply.MasterPublicKey = st.masterPublicKey
-		reply.BLSPublicKey = st.blsPublicKey
-		reply.Signature = st.revealSignature
-		return nil
-	}
-
-	commitment := args.Commitments[hex.EncodeToString(srv.publicKey)]
-	expected := commitTo(st.masterPublicKey, st.blsPublicKey)
-	if !bytes.Equal(commitment, expected) {
-		return errors.New("unexpected commitment for key %x", srv.publicKey)
-	}
-
-	hexkeys := make([]string, 0, len(args.Commitments))
-	for k := range args.Commitments {
-		hexkeys = append(hexkeys, k)
-	}
-	sort.Strings(hexkeys)
-
-	buf := new(bytes.Buffer)
-	buf.WriteString("Commitments")
-	binary.Write(buf, binary.BigEndian, args.Round)
-
-	for _, hexkey := range hexkeys {
-		if len(hexkey) != hex.EncodedLen(ed25519.PublicKeySize) {
-			return errors.New("bad public key length for hex key %s: %d != %d",
-				hexkey, len(hexkey), hex.EncodedLen(ed25519.PublicKeySize))
+	if st.revealSignature == nil {
+		commitment := args.Commitments[hex.EncodeToString(srv.publicKey)]
+		expected := commitTo(st.masterPublicKey, st.blsPublicKey)
+		if !bytes.Equal(commitment, expected) {
+			httpError(w, errorf(ErrBadCommitment, "unexpected commitment for key %x", srv.publicKey))
+			return
 		}
 
-		commitment := args.Commitments[hexkey]
-		if len(commitment) != len(expected) {
-			return errors.New("bad commitment length for key %s: %d != %d",
-				hexkey, len(commitment), len(expected))
+		hexkeys := make([]string, 0, len(args.Commitments))
+		for k := range args.Commitments {
+			hexkeys = append(hexkeys, k)
 		}
+		sort.Strings(hexkeys)
 
-		buf.WriteString(hexkey)
-		buf.Write(commitment)
+		buf := new(bytes.Buffer)
+		buf.WriteString("Commitments")
+		binary.Write(buf, binary.BigEndian, args.Round)
+
+		for _, hexkey := range hexkeys {
+			if len(hexkey) != hex.EncodedLen(ed25519.PublicKeySize) {
+				httpError(w, errorf(ErrBadCommitment, "bad public key length for hex key %s: %d != %d",
+					hexkey, len(hexkey), hex.EncodedLen(ed25519.PublicKeySize)))
+				return
+			}
+
+			commitment := args.Commitments[hexkey]
+			if len(commitment) != len(expected) {
+				httpError(w, errorf(ErrBadCommitment, "bad commitment length for key %s: %d != %d",
+					hexkey, len(commitment), len(expected)))
+				return
+			}
+
+			buf.WriteString(hexkey)
+			buf.Write(commitment)
+		}
+		st.revealSignature = ed25519.Sign(srv.privateKey, buf.Bytes())
 	}
 
-	st.revealSignature = ed25519.Sign(srv.privateKey, buf.Bytes())
-	reply.Signature = st.revealSignature
-	reply.MasterPublicKey = st.masterPublicKey
-	reply.BLSPublicKey = st.blsPublicKey
-	return nil
+	reply := &RevealReply{
+		MasterPublicKey: st.masterPublicKey,
+		BLSPublicKey:    st.blsPublicKey,
+		Signature:       st.revealSignature,
+	}
+	bs, err := json.Marshal(reply)
+	if err != nil {
+		panic(err)
+	}
+	w.Write(bs)
 }
 
-type PKGSettings map[string]RevealReply
+type RoundSettings map[string]RevealReply
 
-func (s PKGSettings) Verify(round uint32, keys []ed25519.PublicKey) bool {
+func (s RoundSettings) Verify(round uint32, keys []ed25519.PublicKey) bool {
 	hexkeys := make([]string, len(keys))
 	for i := range keys {
 		hexkeys[i] = hex.EncodeToString(keys[i])
@@ -294,29 +358,78 @@ func (s PKGSettings) Verify(round uint32, keys []ed25519.PublicKey) bool {
 	return true
 }
 
-func NewRound(conns []*vrpc.Client, round uint32) (PKGSettings, error) {
+type PublicServerConfig struct {
+	Key     ed25519.PublicKey
+	Address string
+}
+
+type CoordinatorClient struct {
+	CoordinatorKey ed25519.PrivateKey
+
+	initOnce sync.Once
+	client   *edhttp.Client
+}
+
+func (c *CoordinatorClient) init() {
+	c.initOnce.Do(func() {
+		c.client = &edhttp.Client{
+			Key: c.CoordinatorKey,
+		}
+	})
+}
+
+func (c *CoordinatorClient) NewRound(pkgs []PublicServerConfig, round uint32) (RoundSettings, error) {
+	c.init()
+
 	commitments := make(map[string][]byte)
-	for _, c := range conns {
-		reply := new(CommitReply)
-		err := c.Call("PKG.Commit", round, reply)
+	commitArgs := &commitArgs{
+		Round: round,
+	}
+	for _, pkg := range pkgs {
+		commitReply := new(commitReply)
+		req := &pkgRequest{
+			PublicServerConfig: pkg,
+
+			Path:   "commit",
+			Args:   commitArgs,
+			Reply:  commitReply,
+			Client: c.client,
+		}
+		err := req.Do()
 		if err != nil {
 			return nil, err
 		}
-		commitments[hex.EncodeToString(c.TheirKey)] = reply.Commitment
+		commitments[hex.EncodeToString(pkg.Key)] = commitReply.Commitment
 	}
 
-	settings := make(PKGSettings)
-	revealArgs := &RevealArgs{
+	settings := make(RoundSettings)
+	revealArgs := &revealArgs{
 		Round:       round,
 		Commitments: commitments,
 	}
-	for _, c := range conns {
+	for _, pkg := range pkgs {
 		var reply RevealReply
-		err := c.Call("PKG.Reveal", revealArgs, &reply)
+		req := &pkgRequest{
+			PublicServerConfig: pkg,
+
+			Path:   "reveal",
+			Args:   revealArgs,
+			Reply:  &reply,
+			Client: c.client,
+		}
+		err := req.Do()
 		if err != nil {
 			return nil, err
 		}
-		settings[hex.EncodeToString(c.TheirKey)] = reply
+		settings[hex.EncodeToString(pkg.Key)] = reply
+	}
+
+	keys := make([]ed25519.PublicKey, len(pkgs))
+	for i := range pkgs {
+		keys[i] = pkgs[i].Key
+	}
+	if !settings.Verify(round, keys) {
+		return nil, errors.New("could not verify round settings")
 	}
 
 	return settings, nil

@@ -29,6 +29,8 @@ const (
 	ErrInvalidSignature
 	ErrInvalidToken
 	ErrExpiredToken
+	ErrUnauthorized
+	ErrBadCommitment
 
 	ErrUnknown
 )
@@ -47,6 +49,8 @@ var errText = map[ErrorCode]string{
 	ErrInvalidSignature:       "invalid signature",
 	ErrInvalidToken:           "invalid token",
 	ErrExpiredToken:           "expired token",
+	ErrUnauthorized:           "unauthorized",
+	ErrBadCommitment:          "bad commitment",
 
 	ErrUnknown: "unknown error",
 }
@@ -55,6 +59,8 @@ func (e ErrorCode) httpCode() int {
 	switch e {
 	case ErrDatabaseError, ErrSendingEmail, ErrUnknown:
 		return http.StatusInternalServerError
+	case ErrUnauthorized:
+		return http.StatusUnauthorized
 	default:
 		return http.StatusBadRequest
 	}

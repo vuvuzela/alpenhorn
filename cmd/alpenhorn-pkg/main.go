@@ -21,8 +21,8 @@ import (
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
+	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/pkg"
-	"vuvuzela.io/alpenhorn/vrpc"
 	"vuvuzela.io/crypto/rand"
 )
 
@@ -36,9 +36,8 @@ type Config struct {
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
 
-	DBName           string
-	ClientListenAddr string
-	EntryListenAddr  string
+	DBName     string
+	ListenAddr string
 }
 
 var funcMap = template.FuncMap{
@@ -51,8 +50,7 @@ publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
 
 dbName = {{.DBName | printf "%q"}}
-clientListenAddr = {{.ClientListenAddr | printf "%q"}}
-entryListenAddr = {{.EntryListenAddr | printf "%q"}}
+listenAddr = {{.ListenAddr | printf "%q"}}
 `
 
 func writeNewConfig() {
@@ -65,9 +63,8 @@ func writeNewConfig() {
 		PublicKey:  publicKey,
 		PrivateKey: privateKey,
 
-		DBName:           "pkg",
-		ClientListenAddr: "0.0.0.0:80",
-		EntryListenAddr:  "0.0.0.0:27270",
+		DBName:     "pkg",
+		ListenAddr: "0.0.0.0:80",
 	}
 
 	tmpl := template.Must(template.New("config").Funcs(funcMap).Parse(confTemplate))
@@ -127,17 +124,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("error parsing config %q: %s", *confPath, err)
 	}
+	err = checkConfig(conf)
+	if err != nil {
+		log.Fatalf("invalid config: %s", err)
+	}
 
 	pkgConfig := &pkg.Config{
-		SigningKey: conf.PrivateKey,
-		DBName:     conf.DBName,
+		SigningKey:     conf.PrivateKey,
+		DBName:         conf.DBName,
+		CoordinatorKey: coordinatorKey,
 	}
 	pkgServer, err := pkg.NewServer(pkgConfig)
 	if err != nil {
 		log.Fatalf("pkg.NewServer: %s", err)
 	}
 
-	clientListener, err := edtls.Listen("tcp", conf.ClientListenAddr, conf.PrivateKey)
+	listener, err := edtls.Listen("tcp", conf.ListenAddr, conf.PrivateKey)
 	if err != nil {
 		log.Fatalf("edtls.Listen: %s", err)
 	}
@@ -146,18 +148,27 @@ func main() {
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 60 * time.Second,
 	}
-	httpServer.SetKeepAlivesEnabled(false)
-	go func() {
-		err := httpServer.Serve(clientListener)
-		if err != nil {
-			log.Fatalf("http listen: %s", err)
-		}
-	}()
 
-	rpcServer := new(vrpc.Server)
-	if err := rpcServer.Register(coordinatorKey, "PKG", (*pkg.CoordinatorService)(pkgServer)); err != nil {
-		log.Fatalf("vrpc.Register: %s", err)
+	log.Printf("Listening on %q", conf.ListenAddr)
+	err = httpServer.Serve(listener)
+	if err != nil {
+		log.Fatalf("http listen: %s", err)
 	}
-	err = rpcServer.ListenAndServe(conf.EntryListenAddr, conf.PrivateKey)
-	log.Fatal(err)
+}
+
+func checkConfig(conf *Config) error {
+	if conf.ListenAddr == "" {
+		return errors.New("no listen address specified")
+	}
+	if conf.DBName == "" {
+		return errors.New("no database name specified")
+	}
+	if len(conf.PrivateKey) != ed25519.PrivateKeySize {
+		return errors.New("invalid private key")
+	}
+	expectedPub := conf.PrivateKey.Public().(ed25519.PublicKey)
+	if !bytes.Equal(expectedPub, conf.PublicKey) {
+		return errors.New("public key does not correspond to private key")
+	}
+	return nil
 }

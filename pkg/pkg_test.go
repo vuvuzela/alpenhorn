@@ -18,22 +18,21 @@ import (
 
 	"vuvuzela.io/alpenhorn/internal/mock"
 	"vuvuzela.io/alpenhorn/pkg"
-	"vuvuzela.io/alpenhorn/vrpc"
 	"vuvuzela.io/crypto/ibe"
 )
 
-func launchPKG(t *testing.T, sendMail pkg.SendMailHandler) (*mock.PKG, *vrpc.Client) {
-	entryPub, entryPriv, _ := ed25519.GenerateKey(rand.Reader)
-	testpkg, err := mock.LaunchPKG(entryPub, sendMail)
+func launchPKG(t *testing.T, sendMail pkg.SendMailHandler) (*mock.PKG, *pkg.CoordinatorClient) {
+	coordinatorPub, coordinatorPriv, _ := ed25519.GenerateKey(rand.Reader)
+	testpkg, err := mock.LaunchPKG(coordinatorPub, sendMail)
 	if err != nil {
 		t.Fatalf("error launching PKG: %s", err)
 	}
 
-	entryConn, err := vrpc.Dial("tcp", testpkg.EntryAddr, testpkg.Key, entryPriv, 1)
-	if err != nil {
-		t.Fatalf("vrpc.Dial: %s", err)
+	coordinatorClient := &pkg.CoordinatorClient{
+		CoordinatorKey: coordinatorPriv,
 	}
-	return testpkg, entryConn
+
+	return testpkg, coordinatorClient
 }
 
 func TestSingleClient(t *testing.T) {
@@ -43,20 +42,18 @@ func TestSingleClient(t *testing.T) {
 	}
 	emailPipe := make(chan msg, 1)
 
-	testpkg, entryConn := launchPKG(t, func(to string, token []byte) error {
+	testpkg, coordinatorClient := launchPKG(t, func(to string, token []byte) error {
 		emailPipe <- msg{to, token}
 		return nil
 	})
 	defer testpkg.Close()
-	defer entryConn.Close()
 
 	alicePub, alicePriv, _ := ed25519.GenerateKey(rand.Reader)
 	client := &pkg.Client{
-		ServerAddr:      testpkg.ClientAddr,
-		ServerKey:       testpkg.Key,
-		Username:        "alice@example.org",
-		LoginKey:        alicePriv,
-		UserLongTermKey: alicePub,
+		PublicServerConfig: testpkg.PublicServerConfig,
+		Username:           "alice@example.org",
+		LoginKey:           alicePriv,
+		UserLongTermKey:    alicePub,
 	}
 
 	err := client.Register()
@@ -94,7 +91,8 @@ func TestSingleClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pkgSettings, err := pkg.NewRound([]*vrpc.Client{entryConn}, 42)
+	pkgs := []pkg.PublicServerConfig{testpkg.PublicServerConfig}
+	pkgSettings, err := coordinatorClient.NewRound(pkgs, 42)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,17 +132,15 @@ func TestSingleClient(t *testing.T) {
 }
 
 func TestRegisterFirstComeFirstServe(t *testing.T) {
-	testpkg, entryConn := launchPKG(t, nil)
+	testpkg, coordinatorClient := launchPKG(t, nil)
 	defer testpkg.Close()
-	defer entryConn.Close()
 
 	alicePub, alicePriv, _ := ed25519.GenerateKey(rand.Reader)
 	client := &pkg.Client{
-		ServerAddr:      testpkg.ClientAddr,
-		ServerKey:       testpkg.Key,
-		Username:        "alice@example.org",
-		LoginKey:        alicePriv,
-		UserLongTermKey: alicePub,
+		PublicServerConfig: testpkg.PublicServerConfig,
+		Username:           "alice@example.org",
+		LoginKey:           alicePriv,
+		UserLongTermKey:    alicePub,
 	}
 
 	err := client.Register()
@@ -157,7 +153,8 @@ func TestRegisterFirstComeFirstServe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = pkg.NewRound([]*vrpc.Client{entryConn}, 42)
+	pkgs := []pkg.PublicServerConfig{testpkg.PublicServerConfig}
+	_, err = coordinatorClient.NewRound(pkgs, 42)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,9 +166,8 @@ func TestRegisterFirstComeFirstServe(t *testing.T) {
 }
 
 func TestManyClients(t *testing.T) {
-	testpkg, entryConn := launchPKG(t, nil)
+	testpkg, coordinatorClient := launchPKG(t, nil)
 	defer testpkg.Close()
-	defer entryConn.Close()
 
 	numThreads := 10
 	usersPerThread := 1000
@@ -180,11 +176,10 @@ func TestManyClients(t *testing.T) {
 		for i := 0; i < usersPerThread; i++ {
 			userPub, userPriv, _ := ed25519.GenerateKey(rand.Reader)
 			clients[thread*usersPerThread+i] = &pkg.Client{
-				ServerAddr:      testpkg.ClientAddr,
-				ServerKey:       testpkg.Key,
-				Username:        fmt.Sprintf("%d@thread%d", i, thread),
-				LoginKey:        userPriv,
-				UserLongTermKey: userPub,
+				PublicServerConfig: testpkg.PublicServerConfig,
+				Username:           fmt.Sprintf("%d@thread%d", i, thread),
+				LoginKey:           userPriv,
+				UserLongTermKey:    userPub,
 			}
 		}
 	}
@@ -208,7 +203,8 @@ func TestManyClients(t *testing.T) {
 	end := time.Now()
 	t.Logf("Registered %d users in %s", numThreads*usersPerThread, end.Sub(start))
 
-	_, err := pkg.NewRound([]*vrpc.Client{entryConn}, 42)
+	pkgs := []pkg.PublicServerConfig{testpkg.PublicServerConfig}
+	_, err := coordinatorClient.NewRound(pkgs, 42)
 	if err != nil {
 		t.Fatal(err)
 	}

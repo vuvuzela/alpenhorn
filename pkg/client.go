@@ -10,13 +10,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"net/http"
+	"sync"
 
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/box"
 
-	"vuvuzela.io/alpenhorn/edtls"
+	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/crypto/bls"
 	"vuvuzela.io/crypto/ibe"
@@ -28,11 +28,7 @@ import (
 // ownership of the username, unless the PKG server is running in
 // first-come-first-serve mode.
 type Client struct {
-	// ServerAddr is the host:port address of the PKG server.
-	ServerAddr string
-
-	// ServerKey is the long-term signing key of the PKG server.
-	ServerKey ed25519.PublicKey
+	PublicServerConfig
 
 	// Username is identity in Identity-Based Encryption.
 	Username string
@@ -44,6 +40,9 @@ type Client struct {
 	// PKG server attests to this key during extraction. JSON
 	// ignores this field since it does not need to be persisted.
 	UserLongTermKey ed25519.PublicKey `json:"-"`
+
+	once       sync.Once
+	httpClient *edhttp.Client
 }
 
 // Register attempts to register the client's username and login key
@@ -56,7 +55,7 @@ func (c *Client) Register() error {
 	}
 
 	var reply string
-	err := c.postJSON("register", args, &reply)
+	err := c.do("register", args, &reply)
 	if err != nil {
 		return err
 	}
@@ -73,7 +72,7 @@ func (c *Client) Verify(token []byte) error {
 	args.Sign(c.LoginKey)
 
 	var reply string
-	err := c.postJSON("verify", args, &reply)
+	err := c.do("verify", args, &reply)
 	if err != nil {
 		return err
 	}
@@ -97,12 +96,12 @@ func (c *Client) Extract(round uint32) (*ExtractResult, error) {
 		Username:         c.Username,
 		ReturnKey:        myPub,
 		UserLongTermKey:  c.UserLongTermKey,
-		ServerSigningKey: c.ServerKey,
+		ServerSigningKey: c.PublicServerConfig.Key,
 	}
 	args.Sign(c.LoginKey)
 
 	reply := new(extractReply)
-	err = c.postJSON("extract", args, reply)
+	err = c.do("extract", args, reply)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +115,7 @@ func (c *Client) Extract(round uint32) (*ExtractResult, error) {
 	if l := len(reply.EncryptedPrivateKey); l < 32 {
 		return nil, errors.New("unexpectedly short ciphertext (%d bytes)", l)
 	}
-	if !reply.Verify(c.ServerKey) {
+	if !reply.Verify(c.PublicServerConfig.Key) {
 		return nil, errors.New("invalid signature")
 	}
 
@@ -139,30 +138,54 @@ func (c *Client) Extract(round uint32) (*ExtractResult, error) {
 	}, nil
 }
 
-func (c *Client) postJSON(urlPath string, args interface{}, reply interface{}) error {
-	buf := new(bytes.Buffer)
-	if err := json.NewEncoder(buf).Encode(args); err != nil {
-		return errors.Wrap(err, "json.Encode")
-	}
+func (c *Client) do(path string, args, reply interface{}) error {
+	c.once.Do(func() {
+		c.httpClient = &edhttp.Client{}
+	})
 
-	url := fmt.Sprintf("https://%s/%s", c.ServerAddr, urlPath)
-	req, err := http.NewRequest("POST", url, buf)
-	if err != nil {
-		return err
-	}
-	req.Close = true
-
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			DialTLS: func(network, addr string) (net.Conn, error) {
-				return edtls.Dial(network, addr, c.ServerKey, nil)
-			},
+	req := &pkgRequest{
+		PublicServerConfig: c.PublicServerConfig,
+		Path:               path,
+		Args:               args,
+		Reply:              reply,
+		Client:             c.httpClient,
+		TweakRequest: func(req *http.Request) {
+			req.Close = true
 		},
 	}
 
-	resp, err := httpClient.Do(req)
+	return req.Do()
+}
+
+type pkgRequest struct {
+	PublicServerConfig
+
+	Path   string
+	Args   interface{}
+	Reply  interface{}
+	Client *edhttp.Client
+
+	TweakRequest func(*http.Request)
+}
+
+func (req *pkgRequest) Do() error {
+	buf := new(bytes.Buffer)
+	if err := json.NewEncoder(buf).Encode(req.Args); err != nil {
+		return errors.Wrap(err, "json.Encode")
+	}
+
+	url := fmt.Sprintf("https://%s/%s", req.PublicServerConfig.Address, req.Path)
+	httpReq, err := http.NewRequest("POST", url, buf)
 	if err != nil {
-		return errors.Wrap(err, "POST error")
+		return err
+	}
+	if req.TweakRequest != nil {
+		req.TweakRequest(httpReq)
+	}
+
+	resp, err := req.Client.Do(req.PublicServerConfig.Key, httpReq)
+	if err != nil {
+		return errors.Wrap(err, "error making PKG request %q", url)
 	}
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
@@ -170,7 +193,7 @@ func (c *Client) postJSON(urlPath string, args interface{}, reply interface{}) e
 		return errors.Wrap(err, "reading http response body")
 	}
 	if resp.StatusCode == http.StatusOK {
-		if err := json.Unmarshal(body, reply); err != nil {
+		if err := json.Unmarshal(body, req.Reply); err != nil {
 			return errors.Wrap(err, "json.Unmarshal")
 		}
 		return nil
