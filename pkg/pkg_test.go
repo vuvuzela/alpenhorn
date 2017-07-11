@@ -171,6 +171,10 @@ func TestRegisterFirstComeFirstServe(t *testing.T) {
 }
 
 func TestManyClients(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode.")
+	}
+
 	testpkg, coordinatorClient := launchPKG(t, nil)
 	defer testpkg.Close()
 
