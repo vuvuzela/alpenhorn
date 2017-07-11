@@ -10,6 +10,7 @@ import (
 	"encoding"
 	"encoding/hex"
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -178,7 +179,7 @@ func TestManyClients(t *testing.T) {
 	testpkg, coordinatorClient := launchPKG(t, nil)
 	defer testpkg.Close()
 
-	numThreads := 10
+	numThreads := runtime.NumCPU()
 	usersPerThread := 1000
 	clients := make([]*pkg.Client, numThreads*usersPerThread)
 	for thread := 0; thread < numThreads; thread++ {
