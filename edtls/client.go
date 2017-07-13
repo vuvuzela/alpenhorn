@@ -18,19 +18,19 @@ var (
 )
 
 func Dial(network, addr string, theirKey ed25519.PublicKey, myKey ed25519.PrivateKey) (*tls.Conn, error) {
-	config := newTLSClientConfig(myKey, theirKey)
+	config := NewTLSClientConfig(myKey, theirKey)
 
 	return tls.Dial(network, addr, config)
 }
 
 func Client(rawConn net.Conn, theirKey ed25519.PublicKey, myKey ed25519.PrivateKey) *tls.Conn {
-	config := newTLSClientConfig(myKey, theirKey)
+	config := NewTLSClientConfig(myKey, theirKey)
 
 	conn := tls.Client(rawConn, config)
 	return conn
 }
 
-func newTLSClientConfig(myKey ed25519.PrivateKey, peerKey ed25519.PublicKey) *tls.Config {
+func NewTLSClientConfig(myKey ed25519.PrivateKey, peerKey ed25519.PublicKey) *tls.Config {
 	var config = &tls.Config{
 		RootCAs:            x509.NewCertPool(),
 		ClientAuth:         tls.RequestClientCert,

@@ -18,18 +18,18 @@ import (
 )
 
 func Listen(network, laddr string, key ed25519.PrivateKey) (net.Listener, error) {
-	config := newTLSServerConfig(key)
+	config := NewTLSServerConfig(key)
 
 	return tls.Listen(network, laddr, config)
 }
 
 func Server(conn net.Conn, key ed25519.PrivateKey) *tls.Conn {
-	config := newTLSServerConfig(key)
+	config := NewTLSServerConfig(key)
 
 	return tls.Server(conn, config)
 }
 
-func newTLSServerConfig(key ed25519.PrivateKey) *tls.Config {
+func NewTLSServerConfig(key ed25519.PrivateKey) *tls.Config {
 	var mu sync.Mutex
 	var expiry time.Time
 	var currCert *tls.Certificate
