@@ -62,11 +62,7 @@ func TestServer(t *testing.T) {
 		defer t.Logf("server done")
 		defer pipeServer.Close()
 		t.Logf("server new")
-		conn, err := Server(pipeServer, serverPrivateKey)
-		if err != nil {
-			t.Error(err)
-			return
-		}
+		conn := Server(pipeServer, serverPrivateKey)
 		if err := conn.Handshake(); err != nil {
 			conn.Close()
 			t.Error(err)

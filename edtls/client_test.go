@@ -25,10 +25,7 @@ func TestClientVerificationFailure(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c, err := Server(server, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
+		c := Server(server, nil)
 		defer c.Close()
 		_, _ = io.Copy(ioutil.Discard, c)
 	}()

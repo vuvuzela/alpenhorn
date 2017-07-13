@@ -16,23 +16,18 @@ import (
 )
 
 func Listen(network, laddr string, key ed25519.PrivateKey) (net.Listener, error) {
-	config, err := newTLSServerConfig(key)
-	if err != nil {
-		return nil, err
-	}
+	config := newTLSServerConfig(key)
 
 	return tls.Listen(network, laddr, config)
 }
 
-func Server(conn net.Conn, key ed25519.PrivateKey) (*tls.Conn, error) {
-	config, err := newTLSServerConfig(key)
-	if err != nil {
-		return nil, err
-	}
-	return tls.Server(conn, config), nil
+func Server(conn net.Conn, key ed25519.PrivateKey) *tls.Conn {
+	config := newTLSServerConfig(key)
+
+	return tls.Server(conn, config)
 }
 
-func newTLSServerConfig(key ed25519.PrivateKey) (*tls.Config, error) {
+func newTLSServerConfig(key ed25519.PrivateKey) *tls.Config {
 	var mu sync.Mutex
 	var expiry time.Time
 	var currCert *tls.Certificate
@@ -63,7 +58,7 @@ func newTLSServerConfig(key ed25519.PrivateKey) (*tls.Config, error) {
 		MinVersion: tls.VersionTLS12,
 	}
 
-	return config, nil
+	return config
 }
 
 var certDuration = 1 * time.Hour
