@@ -32,9 +32,28 @@ func (e *withCause) Error() string {
 	return e.msg + ": " + e.cause.Error()
 }
 
+func (e *withCause) Cause() error {
+	return e.cause
+}
+
 func Wrap(err error, format string, a ...interface{}) error {
 	return &withCause{
 		cause: err,
 		msg:   fmt.Sprintf(format, a...),
 	}
+}
+
+type causer interface {
+	Cause() error
+}
+
+// Cause returns the first cause of the error or returns the original error
+// if the error does not have a cause. This is unlike the pkg/errors package
+// which returns the most underlying cause for the error.
+func Cause(err error) error {
+	cause, ok := err.(causer)
+	if !ok {
+		return err
+	}
+	return cause.Cause()
 }
