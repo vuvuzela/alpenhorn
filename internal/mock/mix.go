@@ -9,124 +9,115 @@ import (
 	"net"
 
 	"golang.org/x/crypto/ed25519"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+
 	"vuvuzela.io/alpenhorn/addfriend"
 	"vuvuzela.io/alpenhorn/dialing"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/mixnet"
-	"vuvuzela.io/alpenhorn/vrpc"
+	"vuvuzela.io/alpenhorn/mixnet/mixnetpb"
 	"vuvuzela.io/crypto/rand"
 )
 
 type Mixchain struct {
-	Keys  []ed25519.PublicKey
-	Addrs []string
+	Servers []mixnet.PublicServerConfig
 
-	rpcServers []*vrpc.Server
+	mixServers []*mixnet.Server
+	rpcServers []*grpc.Server
 }
 
 func (m *Mixchain) Close() error {
-	var err error
 	for _, srv := range m.rpcServers {
-		e := srv.Close()
-		if e != nil && err == nil {
-			err = e
-		}
+		srv.Stop()
 	}
-	return err
+	return nil
 }
 
-func LaunchMixchain(length int, cdnAddr string, entryKey, cdnKey ed25519.PublicKey) *Mixchain {
+func LaunchMixchain(length int, cdnAddr string, coordinatorKey, cdnKey ed25519.PublicKey) *Mixchain {
 	publicKeys := make([]ed25519.PublicKey, length)
 	privateKeys := make([]ed25519.PrivateKey, length)
 	listeners := make([]net.Listener, length)
 	addrs := make([]string, length)
 	for i := 0; i < length; i++ {
 		publicKeys[i], privateKeys[i], _ = ed25519.GenerateKey(rand.Reader)
-		l, err := edtls.Listen("tcp", "localhost:0", privateKeys[i])
+		// Use net.Listen instead of edtls.Listen because grpc will perform
+		// the edtls handshake using the TLS credentials below.
+		l, err := net.Listen("tcp", "localhost:0")
 		if err != nil {
-			log.Panicf("edtls.Listen: %s", err)
+			log.Panicf("net.Listen: %s", err)
 		}
 		listeners[i] = l
 		addrs[i] = l.Addr().String()
 	}
 
-	rpcServers := make([]*vrpc.Server, length)
+	mixServers := make([]*mixnet.Server, length)
+	rpcServers := make([]*grpc.Server, length)
 	for pos := length - 1; pos >= 0; pos-- {
-		var nextServer *vrpc.Client
+		var nextServer mixnet.PublicServerConfig
 		// if not the last server
 		if pos < length-1 {
-			var err error
-			nextServer, err = vrpc.Dial("tcp", listeners[pos+1].Addr().String(), publicKeys[pos+1], privateKeys[pos], 2)
-			if err != nil {
-				log.Panicf("vrpc.Dial: %s", err)
+			nextServer = mixnet.PublicServerConfig{
+				Key:     publicKeys[pos+1],
+				Address: addrs[pos+1],
 			}
 		}
 
-		addFriendMixnet := &mixnet.Server{
+		mixer := &mixnet.Server{
 			SigningKey:     privateKeys[pos],
+			CoordinatorKey: coordinatorKey,
+
 			ServerPosition: pos,
 			NumServers:     length,
 			NextServer:     nextServer,
 			CDNAddr:        cdnAddr,
 			CDNPublicKey:   cdnKey,
 
-			Mixer: &addfriend.Mixer{},
-			Laplace: rand.Laplace{
-				Mu: 100,
-				B:  3.0,
+			Services: map[string]mixnet.MixService{
+				"AddFriend": &addfriend.Mixer{
+					Laplace: rand.Laplace{
+						Mu: 100,
+						B:  3.0,
+					},
+				},
+
+				"Dialing": &dialing.Mixer{
+					Laplace: rand.Laplace{
+						Mu: 100,
+						B:  3.0,
+					},
+				},
 			},
 		}
 
-		dialingMixnet := &mixnet.Server{
-			SigningKey:     privateKeys[pos],
-			ServerPosition: pos,
-			NumServers:     length,
-			NextServer:     nextServer,
-			CDNAddr:        cdnAddr,
-			CDNPublicKey:   cdnKey,
+		creds := credentials.NewTLS(edtls.NewTLSServerConfig(privateKeys[pos]))
 
-			Mixer: &dialing.Mixer{},
-			Laplace: rand.Laplace{
-				Mu: 100,
-				B:  3.0,
-			},
-		}
+		grpcServer := grpc.NewServer(grpc.Creds(creds))
+		mixnetpb.RegisterMixnetServer(grpcServer, mixer)
 
-		srv := new(vrpc.Server)
-		rpcServers[pos] = srv
-
-		if err := srv.Register(entryKey, "DialingCoordinator", &mixnet.CoordinatorService{dialingMixnet}); err != nil {
-			log.Fatalf("vrpc.Register: %s", err)
-		}
-		if err := srv.Register(entryKey, "AddFriendCoordinator", &mixnet.CoordinatorService{addFriendMixnet}); err != nil {
-			log.Fatalf("vrpc.Register: %s", err)
-		}
-
-		var prevKey ed25519.PublicKey
-		if pos == 0 {
-			prevKey = entryKey
-		} else {
-			prevKey = publicKeys[pos-1]
-		}
-		if err := srv.Register(prevKey, "DialingChain", &mixnet.ChainService{dialingMixnet}); err != nil {
-			log.Fatalf("vrpc.Register: %s", err)
-		}
-		if err := srv.Register(prevKey, "AddFriendChain", &mixnet.ChainService{addFriendMixnet}); err != nil {
-			log.Fatalf("vrpc.Register: %s", err)
-		}
+		mixServers[pos] = mixer
+		rpcServers[pos] = grpcServer
 
 		go func(pos int) {
-			err := srv.Serve(listeners[pos], privateKeys[pos])
-			if err != vrpc.ErrServerClosed {
+			err := grpcServer.Serve(listeners[pos])
+			if err != grpc.ErrServerStopped {
 				log.Fatal("vrpc.Serve:", err)
 			}
 		}(pos)
 	}
 
-	return &Mixchain{
-		Keys:  publicKeys,
-		Addrs: addrs,
+	serversPublic := make([]mixnet.PublicServerConfig, len(mixServers))
+	for i, mixer := range mixServers {
+		serversPublic[i] = mixnet.PublicServerConfig{
+			Key:     mixer.SigningKey.Public().(ed25519.PublicKey),
+			Address: addrs[i],
+		}
+	}
 
+	return &Mixchain{
+		Servers: serversPublic,
+
+		mixServers: mixServers,
 		rpcServers: rpcServers,
 	}
 }

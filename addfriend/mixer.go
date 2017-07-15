@@ -36,14 +36,15 @@ type MixMessage struct {
 }
 
 type Mixer struct {
-}
-
-func (srv *Mixer) Service() string {
-	return "AddFriend"
+	Laplace rand.Laplace
 }
 
 func (srv *Mixer) MessageSize() int {
 	return sizeMixMessage
+}
+
+func (srv *Mixer) NoiseCount() uint32 {
+	return srv.Laplace.Uint32()
 }
 
 var zeroNonce = new([24]byte)

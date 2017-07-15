@@ -18,26 +18,30 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/box"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/errors"
-	"vuvuzela.io/alpenhorn/vrpc"
+	pb "vuvuzela.io/alpenhorn/mixnet/mixnetpb"
 	"vuvuzela.io/concurrency"
 	"vuvuzela.io/crypto/onionbox"
 	"vuvuzela.io/crypto/rand"
 	"vuvuzela.io/crypto/shuffle"
 )
 
-// A Mixer provides functionality needed by a mixnet Server.
-type Mixer interface {
-	// Service returns the name of this mix service (for example,
-	// "AddFriend" or "Dialing"). This is used to distinguish
-	// multiple mix servers listening on the same port.
-	Service() string
-
+// MixService provides functionality needed by a mixnet Server.
+type MixService interface {
 	// MessageSize returns the expected size of messages in bytes
 	// after the last onion layer is peeled.
 	MessageSize() int
+
+	// NoiseCount returns how much noise to generate for a mailbox.
+	NoiseCount() uint32
 
 	// FillWithNoise generates noise to provide differential privacy.
 	// noiseCounts specifies how much noise to add to each mailbox.
@@ -49,27 +53,28 @@ type Mixer interface {
 }
 
 type Server struct {
-	Mixer Mixer
+	SigningKey ed25519.PrivateKey
 
-	SigningKey     ed25519.PrivateKey
+	CoordinatorKey ed25519.PublicKey
+
+	Services map[string]MixService
+
 	ServerPosition int // position in chain, starting at 0
 	NumServers     int
-	NextServer     *vrpc.Client
+	NextServer     PublicServerConfig
 	CDNPublicKey   ed25519.PublicKey
 	CDNAddr        string
 
-	Laplace rand.Laplace
-
 	roundsMu sync.RWMutex
-	rounds   map[uint32]*roundState
+	rounds   map[serviceRound]*roundState
+
+	once      sync.Once
+	mixClient *Client
 }
 
-type CoordinatorService struct {
-	*Server
-}
-
-type ChainService struct {
-	*Server
+type serviceRound struct {
+	Service string
+	Round   uint32
 }
 
 type roundState struct {
@@ -89,7 +94,7 @@ type roundState struct {
 	noiseDone chan struct{}
 }
 
-func (srv *Server) getRound(round uint32) (*roundState, error) {
+func (srv *Server) getRound(service string, round uint32) (*roundState, error) {
 	var ok bool
 	var st *roundState
 
@@ -97,7 +102,7 @@ func (srv *Server) getRound(round uint32) (*roundState, error) {
 	if srv.rounds == nil {
 		ok = false
 	} else {
-		st, ok = srv.rounds[round]
+		st, ok = srv.rounds[serviceRound{service, round}]
 	}
 	srv.roundsMu.RUnlock()
 	if !ok {
@@ -106,32 +111,57 @@ func (srv *Server) getRound(round uint32) (*roundState, error) {
 	return st, nil
 }
 
-type NewRoundArgs struct {
-	Round uint32
+func (srv *Server) authCoordinator(ctx context.Context) error {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return status.Errorf(codes.DataLoss, "failed to get peer from ctx")
+	}
+
+	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok {
+		return status.Errorf(codes.Unauthenticated, "unknown AuthInfo type: %s", p.AuthInfo.AuthType())
+	}
+
+	certs := tlsInfo.State.PeerCertificates
+	if len(certs) != 1 {
+		status.Errorf(codes.Unauthenticated, "expecting 1 peer certificate, got %d", len(certs))
+	}
+	peerKey := edtls.GetSigningKey(certs[0])
+
+	if !bytes.Equal(srv.CoordinatorKey, peerKey) {
+		return status.Errorf(codes.Unauthenticated, "wrong edtls key")
+	}
+
+	return nil
 }
 
-type NewRoundReply struct {
-	OnionKey *[32]byte
-}
+func (srv *Server) NewRound(ctx context.Context, req *pb.NewRoundRequest) (*pb.NewRoundResponse, error) {
+	log.WithFields(log.Fields{"service": req.Service, "rpc": "NewRound", "round": req.Round}).Info()
+	if err := srv.authCoordinator(ctx); err != nil {
+		return nil, err
+	}
 
-func (srv *CoordinatorService) NewRound(args *NewRoundArgs, reply *NewRoundReply) error {
-	log.WithFields(log.Fields{"service": srv.Mixer.Service(), "rpc": "NewRound", "round": args.Round}).Info()
+	_, ok := srv.Services[req.Service]
+	if !ok {
+		return nil, errors.New("unknown service: %q", req.Service)
+	}
 
 	srv.roundsMu.Lock()
 	if srv.rounds == nil {
-		srv.rounds = make(map[uint32]*roundState)
+		srv.rounds = make(map[serviceRound]*roundState)
 	}
-	st := srv.rounds[args.Round]
+	st := srv.rounds[serviceRound{req.Service, req.Round}]
 	srv.roundsMu.Unlock()
 
 	if st != nil {
-		reply.OnionKey = st.onionPublicKey
-		return nil
+		return &pb.NewRoundResponse{
+			OnionKey: st.onionPublicKey[:],
+		}, nil
 	}
 
 	public, private, err := box.GenerateKey(cryptoRand.Reader)
 	if err != nil {
-		return fmt.Errorf("box.GenerateKey error: %s", err)
+		return nil, fmt.Errorf("box.GenerateKey error: %s", err)
 	}
 
 	st = &roundState{
@@ -140,44 +170,12 @@ func (srv *CoordinatorService) NewRound(args *NewRoundArgs, reply *NewRoundReply
 	}
 
 	srv.roundsMu.Lock()
-	srv.rounds[args.Round] = st
+	srv.rounds[serviceRound{req.Service, req.Round}] = st
 	srv.roundsMu.Unlock()
 
-	reply.OnionKey = public
-
-	return nil
-}
-
-type RoundSettings struct {
-	Round uint32
-	// NumMailboxes is the number of real mailboxes (excludes the dummy mailbox).
-	NumMailboxes uint32
-	// OnionKeys are the encryption keys in mixnet order.
-	OnionKeys []*[32]byte
-}
-
-func (r *RoundSettings) Sign(key ed25519.PrivateKey) []byte {
-	return ed25519.Sign(key, r.msg())
-}
-
-func (r *RoundSettings) Verify(key ed25519.PublicKey, sig []byte) bool {
-	return ed25519.Verify(key, r.msg(), sig)
-}
-
-func (r *RoundSettings) msg() []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteString("RoundSettings")
-	binary.Write(buf, binary.BigEndian, r.Round)
-	binary.Write(buf, binary.BigEndian, r.NumMailboxes)
-	for _, key := range r.OnionKeys {
-		buf.Write(key[:])
-	}
-	return buf.Bytes()
-}
-
-type SetRoundSettingsReply struct {
-	// Signature on RoundSettings
-	Signature []byte
+	return &pb.NewRoundResponse{
+		OnionKey: public[:],
+	}, nil
 }
 
 // SetRoundSettings is an RPC used by the coordinator to set the
@@ -187,33 +185,44 @@ type SetRoundSettingsReply struct {
 // from tricking clients and other servers into using different keys
 // or a different number of mailboxes in a round (which can lead to
 // distinguishable noise).
-func (srv *CoordinatorService) SetRoundSettings(settings *RoundSettings, reply *SetRoundSettingsReply) error {
-	log.WithFields(log.Fields{"service": srv.Mixer.Service(), "rpc": "SetRoundSettings", "round": settings.Round}).Info()
+func (srv *Server) SetRoundSettings(ctx context.Context, req *pb.SetRoundSettingsRequest) (*pb.RoundSettingsSignature, error) {
+	if err := srv.authCoordinator(ctx); err != nil {
+		return nil, err
+	}
 
-	st, err := srv.getRound(settings.Round)
+	var settings RoundSettings
+	err := settings.FromProto(req.Settings)
 	if err != nil {
-		return err
+		return nil, status.Errorf(codes.InvalidArgument, "invalid round settings: %s", err)
+	}
+
+	log.WithFields(log.Fields{"service": settings.Service, "rpc": "SetRoundSettings", "round": settings.Round}).Info()
+
+	st, err := srv.getRound(settings.Service, settings.Round)
+	if err != nil {
+		return nil, err
 	}
 
 	st.mu.Lock()
 	defer st.mu.Unlock()
 
 	if st.settingsSignature != nil {
-		reply.Signature = st.settingsSignature
 		// round settings have already been set
-		return nil
+		return &pb.RoundSettingsSignature{
+			Signature: st.settingsSignature,
+		}, nil
 	}
 
 	if len(settings.OnionKeys) != srv.NumServers {
-		return errors.New("bad round settings: want %d keys, got %d", srv.NumServers, len(settings.OnionKeys))
+		return nil, errors.New("bad round settings: want %d keys, got %d", srv.NumServers, len(settings.OnionKeys))
 	}
 
 	if !bytes.Equal(settings.OnionKeys[srv.ServerPosition][:], st.onionPublicKey[:]) {
-		return errors.New("bad round settings: unexpected key at position %d", srv.ServerPosition)
+		return nil, errors.New("bad round settings: unexpected key at position %d", srv.ServerPosition)
 	}
 
-	st.settingsSignature = settings.Sign(srv.SigningKey)
-	reply.Signature = st.settingsSignature
+	sig := ed25519.Sign(srv.SigningKey, settings.SigningMessage())
+	st.settingsSignature = sig
 
 	st.numMailboxes = settings.NumMailboxes
 	st.nextServerKeys = settings.OnionKeys[srv.ServerPosition+1:]
@@ -221,43 +230,42 @@ func (srv *CoordinatorService) SetRoundSettings(settings *RoundSettings, reply *
 
 	// Now is a good time to start generating noise.
 	go func() {
+		service := srv.Services[settings.Service]
+
 		// NOTE: unlike the convo protocol, the last server also adds noise
 		noiseTotal := uint32(0)
 		noiseCounts := make([]uint32, st.numMailboxes+1)
 		for b := range noiseCounts {
-			bmu := srv.Laplace.Uint32()
+			bmu := service.NoiseCount()
 			noiseCounts[b] = bmu
 			noiseTotal += bmu
 		}
 		st.noise = make([][]byte, noiseTotal)
 
-		srv.Mixer.FillWithNoise(st.noise, noiseCounts, st.nextServerKeys)
+		service.FillWithNoise(st.noise, noiseCounts, st.nextServerKeys)
 		close(st.noiseDone)
 	}()
 
-	return nil
-}
-
-type AddArgs struct {
-	Round  uint32
-	Onions [][]byte
+	return &pb.RoundSettingsSignature{
+		Signature: sig,
+	}, nil
 }
 
 var zeroNonce = new([24]byte)
 
-// Add is an RPC used to add onions to the mix.
-func (srv *ChainService) Add(args *AddArgs, _ *struct{}) error {
-	log.WithFields(log.Fields{"service": srv.Mixer.Service(), "rpc": "Add", "round": args.Round, "onions": len(args.Onions)}).Debug()
+func (srv *Server) AddOnions(ctx context.Context, req *pb.AddOnionsRequest) (*pb.Nothing, error) {
+	log.WithFields(log.Fields{"service": req.Service, "rpc": "AddOnions", "round": req.Round, "onions": len(req.Onions)}).Debug()
 
-	st, err := srv.getRound(args.Round)
+	st, err := srv.getRound(req.Service, req.Round)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	service := srv.Services[req.Service]
 
-	messages := make([][]byte, 0, len(args.Onions))
-	expectedOnionSize := (srv.NumServers-srv.ServerPosition)*onionbox.Overhead + srv.Mixer.MessageSize()
+	messages := make([][]byte, 0, len(req.Onions))
+	expectedOnionSize := (srv.NumServers-srv.ServerPosition)*onionbox.Overhead + service.MessageSize()
 
-	for _, onion := range args.Onions {
+	for _, onion := range req.Onions {
 		if len(onion) == expectedOnionSize {
 			var theirPublic [32]byte
 			copy(theirPublic[:], onion[0:32])
@@ -266,7 +274,7 @@ func (srv *ChainService) Add(args *AddArgs, _ *struct{}) error {
 			if ok {
 				messages = append(messages, message)
 			} else {
-				log.WithFields(log.Fields{"service": srv.Mixer.Service(), "rpc": "Add", "round": args.Round}).Error("Decrypting onion failed")
+				log.WithFields(log.Fields{"service": req.Service, "rpc": "Add", "round": req.Round}).Error("Decrypting onion failed")
 			}
 		}
 	}
@@ -275,11 +283,11 @@ func (srv *ChainService) Add(args *AddArgs, _ *struct{}) error {
 	if !st.closed {
 		st.incoming = append(st.incoming, messages...)
 	} else {
-		err = fmt.Errorf("round %d closed", args.Round)
+		err = fmt.Errorf("round %d closed", req.Round)
 	}
 	st.mu.Unlock()
 
-	return err
+	return &pb.Nothing{}, err
 }
 
 func (srv *Server) filterIncoming(st *roundState) {
@@ -298,31 +306,28 @@ func (srv *Server) filterIncoming(st *roundState) {
 	st.incoming = incomingValid
 }
 
-type CloseReply struct {
-	URL string
-}
+func (srv *Server) CloseRound(ctx context.Context, req *pb.CloseRoundRequest) (*pb.CloseRoundResponse, error) {
+	log.WithFields(log.Fields{"service": req.Service, "rpc": "CloseRound", "round": req.Round}).Info()
 
-func (srv *ChainService) Close(round uint32, reply *CloseReply) error {
-	log.WithFields(log.Fields{"service": srv.Mixer.Service(), "rpc": "Close", "round": round}).Info()
-
-	st, err := srv.getRound(round)
+	st, err := srv.getRound(req.Service, req.Round)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	st.mu.Lock()
 	defer st.mu.Unlock()
 
 	if st.closed {
-		reply.URL = st.url
-		return st.err
+		return &pb.CloseRoundResponse{
+			BaseURL: st.url,
+		}, st.err
 	}
 	st.closed = true
 
 	log.WithFields(log.Fields{
-		"service": srv.Mixer.Service(),
-		"rpc":     "Close",
-		"round":   round,
+		"service": req.Service,
+		"rpc":     "CloseRound",
+		"round":   req.Round,
 		"onions":  len(st.incoming),
 	}).Info()
 
@@ -334,38 +339,46 @@ func (srv *ChainService) Close(round uint32, reply *CloseReply) error {
 	shuffler := shuffle.New(rand.Reader, len(st.incoming))
 	shuffler.Shuffle(st.incoming)
 
-	url, err := srv.nextHop(round, st.incoming)
+	url, err := srv.nextHop(ctx, req.Service, req.Round, st.incoming)
 	st.url = url
 	st.err = err
-	reply.URL = url
 
 	st.incoming = nil
 	st.noise = nil
-	return nil
+	return &pb.CloseRoundResponse{
+		BaseURL: url,
+	}, err
 }
 
 func (srv *Server) lastServer() bool {
 	return srv.ServerPosition == srv.NumServers-1
 }
 
-func (srv *Server) nextHop(round uint32, onions [][]byte) (url string, err error) {
+func (srv *Server) nextHop(ctx context.Context, serviceName string, round uint32, onions [][]byte) (url string, err error) {
 	logger := log.WithFields(log.Fields{
-		"service":  srv.Mixer.Service(),
-		"rpc":      "Close",
+		"service":  serviceName,
+		"rpc":      "CloseRound",
 		"round":    round,
 		"outgoing": len(onions),
 	})
 	startTime := time.Now()
 
 	if !srv.lastServer() {
-		url, err = RunRound(srv.Mixer.Service(), srv.NextServer, round, onions)
+		srv.once.Do(func() {
+			if srv.mixClient == nil {
+				srv.mixClient = &Client{
+					Key: srv.SigningKey,
+				}
+			}
+		})
+		url, err = srv.mixClient.RunRound(ctx, srv.NextServer, serviceName, round, onions)
 		if err != nil {
 			err = fmt.Errorf("RunRound: %s", err)
 			goto End
 		}
 	} else {
 		// last server
-		mailboxes := srv.Mixer.SortMessages(onions)
+		mailboxes := srv.Services[serviceName].SortMessages(onions)
 
 		buf := new(bytes.Buffer)
 		err = gob.NewEncoder(buf).Encode(mailboxes)
@@ -388,7 +401,7 @@ func (srv *Server) nextHop(round uint32, onions [][]byte) (url string, err error
 			},
 		}
 
-		putURL := fmt.Sprintf("https://%s/put?bucket=%s&prefix=%d", srv.CDNAddr, srv.Mixer.Service(), round)
+		putURL := fmt.Sprintf("https://%s/put?bucket=%s/%d", srv.CDNAddr, serviceName, round)
 		var resp *http.Response
 		resp, err = client.Post(putURL, "application/octet-stream", buf)
 		if err != nil {
@@ -401,7 +414,7 @@ func (srv *Server) nextHop(round uint32, onions [][]byte) (url string, err error
 			err = errors.New("bad CDN response: %s", resp.Status)
 			goto End
 		}
-		url = fmt.Sprintf("https://%s/get?bucket=%s&prefix=%d", srv.CDNAddr, srv.Mixer.Service(), round)
+		url = fmt.Sprintf("https://%s/get?bucket=%s/%d", srv.CDNAddr, serviceName, round)
 	}
 
 End:
@@ -415,58 +428,135 @@ End:
 	return
 }
 
+type PublicServerConfig struct {
+	Key     ed25519.PublicKey
+	Address string
+}
+
+type Client struct {
+	Key ed25519.PrivateKey
+
+	mu    sync.Mutex
+	conns map[[ed25519.PublicKeySize]byte]*grpc.ClientConn
+}
+
+func (c *Client) getConn(server PublicServerConfig) (pb.MixnetClient, error) {
+	var k [ed25519.PublicKeySize]byte
+	copy(k[:], server.Key)
+
+	c.mu.Lock()
+	if c.conns == nil {
+		c.conns = make(map[[ed25519.PublicKeySize]byte]*grpc.ClientConn)
+	}
+	cc := c.conns[k]
+	c.mu.Unlock()
+
+	if cc == nil {
+		creds := credentials.NewTLS(edtls.NewTLSClientConfig(c.Key, server.Key))
+
+		var err error
+		cc, err = grpc.Dial(server.Address, grpc.WithTransportCredentials(creds))
+		if err != nil {
+			return nil, err
+		}
+
+		c.mu.Lock()
+		c.conns[k] = cc
+		c.mu.Unlock()
+	}
+
+	return pb.NewMixnetClient(cc), nil
+}
+
 // NewRound starts a new mixing round on the given servers.
 // NewRound fills in settings.OnionKeys and returns the servers'
 // signatures of the round settings.
 //
 // settings.Round and settings.NumMailboxes must be set.
-func NewRound(service string, servers []*vrpc.Client, settings *RoundSettings) ([][]byte, error) {
+func (c *Client) NewRound(ctx context.Context, servers []PublicServerConfig, settings *RoundSettings) ([][]byte, error) {
 	settings.OnionKeys = make([]*[32]byte, len(servers))
 
-	for i, server := range servers {
-		args := &NewRoundArgs{Round: settings.Round}
-		reply := new(NewRoundReply)
-		if err := server.Call(service+"Coordinator.NewRound", args, reply); err != nil {
-			return nil, fmt.Errorf("server %s: %s", server.Address, err)
-		}
-		settings.OnionKeys[i] = reply.OnionKey
+	newRoundReq := &pb.NewRoundRequest{
+		Service: settings.Service,
+		Round:   settings.Round,
 	}
 
+	conns := make([]pb.MixnetClient, len(servers))
+	for i, server := range servers {
+		conn, err := c.getConn(server)
+		if err != nil {
+			return nil, err
+		}
+		conns[i] = conn
+	}
+
+	for i, server := range servers {
+		response, err := conns[i].NewRound(ctx, newRoundReq)
+		if err != nil {
+			return nil, errors.Wrap(err, "server %s: NewRound", server.Address)
+		}
+		key := new([32]byte)
+		copy(key[:], response.OnionKey[:])
+		settings.OnionKeys[i] = key
+	}
+
+	setSettingsReq := &pb.SetRoundSettingsRequest{
+		Settings: settings.Proto(),
+	}
 	signatures := make([][]byte, len(servers))
 	for i, server := range servers {
-		reply := new(SetRoundSettingsReply)
-		if err := server.Call(service+"Coordinator.SetRoundSettings", settings, reply); err != nil {
-			return signatures, fmt.Errorf("server %s: %s", server.Address, err)
+		response, err := conns[i].SetRoundSettings(ctx, setSettingsReq)
+		if err != nil {
+			return signatures, errors.Wrap(err, "server %s: SetRoundSettings", server.Address)
 		}
-		signatures[i] = reply.Signature
+		signatures[i] = response.Signature
 	}
 	return signatures, nil
 }
 
-func RunRound(service string, server *vrpc.Client, round uint32, onions [][]byte) (string, error) {
-	spans := concurrency.Spans(len(onions), 4000)
-	calls := make([]*vrpc.Call, len(spans))
+func (c *Client) RunRound(ctx context.Context, server PublicServerConfig, service string, round uint32, onions [][]byte) (string, error) {
+	conn, err := c.getConn(server)
+	if err != nil {
+		return "", err
+	}
 
-	for i := range calls {
-		span := spans[i]
-		calls[i] = &vrpc.Call{
-			Method: service + "Chain.Add",
-			Args: &AddArgs{
-				Round:  round,
-				Onions: onions[span.Start : span.Start+span.Count],
-			},
-			Reply: nil,
+	spans := concurrency.Spans(len(onions), 4000)
+
+	errs := make(chan error, 1)
+	for _, span := range spans {
+		go func(span concurrency.Span) {
+			req := &pb.AddOnionsRequest{
+				Service: service,
+				Round:   round,
+				Onions:  onions[span.Start : span.Start+span.Count],
+			}
+			_, err := conn.AddOnions(ctx, req)
+			errs <- err
+		}(span)
+	}
+
+	var addErr error
+	for i := 0; i < len(spans); i++ {
+		err := <-errs
+		if addErr == nil && err != nil {
+			addErr = err
 		}
 	}
 
-	if err := server.CallMany(calls); err != nil {
-		return "", fmt.Errorf("Add: %s", err)
+	closeReq := &pb.CloseRoundRequest{
+		Service: service,
+		Round:   round,
+	}
+	closeResponse, closeErr := conn.CloseRound(ctx, closeReq)
+
+	url := ""
+	if closeErr == nil {
+		url = closeResponse.BaseURL
+	}
+	err = addErr
+	if err == nil {
+		err = closeErr
 	}
 
-	reply := new(CloseReply)
-	if err := server.Call(service+"Chain.Close", round, reply); err != nil {
-		return "", fmt.Errorf("Close: %s", err)
-	}
-
-	return reply.URL, nil
+	return url, err
 }

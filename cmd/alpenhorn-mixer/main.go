@@ -9,19 +9,22 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
-	"runtime"
 	"text/template"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	"vuvuzela.io/alpenhorn/addfriend"
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/dialing"
+	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
 	"vuvuzela.io/alpenhorn/mixnet"
-	"vuvuzela.io/alpenhorn/vrpc"
+	pb "vuvuzela.io/alpenhorn/mixnet/mixnetpb"
 	"vuvuzela.io/crypto/rand"
 )
 
@@ -170,60 +173,51 @@ func main() {
 		}
 	}
 
-	var nextServer *vrpc.Client
+	var nextServer mixnet.PublicServerConfig
 	lastServer := ourPos == len(mixers)-1
 	if !lastServer {
 		next := mixers[ourPos+1]
 		if next.Key == nil || next.Address == "" {
 			log.Fatalf("alpenhorn mixer %d is missing a key or address", ourPos+1+1)
 		}
-		nextServer, err = vrpc.Dial("tcp", next.Address, next.Key, conf.PrivateKey, runtime.NumCPU())
-		if err != nil {
-			log.Fatalf("vrpc.Dial: %s", err)
+		nextServer = mixnet.PublicServerConfig{
+			Key:     next.Key,
+			Address: next.Address,
 		}
 	}
 
-	addFriendMixnet := &mixnet.Server{
+	mixServer := &mixnet.Server{
 		SigningKey:     conf.PrivateKey,
+		CoordinatorKey: alpConf.Coordinator.Key,
+
 		ServerPosition: ourPos,
 		NumServers:     len(mixers),
 		NextServer:     nextServer,
 		CDNAddr:        alpConf.CDN.Address,
 		CDNPublicKey:   alpConf.CDN.Key,
 
-		Mixer:   &addfriend.Mixer{},
-		Laplace: conf.AddFriendNoise,
+		Services: map[string]mixnet.MixService{
+			"AddFriend": &addfriend.Mixer{
+				Laplace: conf.AddFriendNoise,
+			},
+
+			"Dialing": &dialing.Mixer{
+				Laplace: conf.DialingNoise,
+			},
+		},
 	}
 
-	dialingMixnet := &mixnet.Server{
-		SigningKey:     conf.PrivateKey,
-		ServerPosition: ourPos,
-		NumServers:     len(mixers),
-		NextServer:     nextServer,
-		CDNAddr:        alpConf.CDN.Address,
-		CDNPublicKey:   alpConf.CDN.Key,
+	creds := credentials.NewTLS(edtls.NewTLSServerConfig(conf.PrivateKey))
+	grpcServer := grpc.NewServer(grpc.Creds(creds))
 
-		Mixer:   &dialing.Mixer{},
-		Laplace: conf.DialingNoise,
-	}
+	pb.RegisterMixnetServer(grpcServer, mixServer)
 
-	srv := new(vrpc.Server)
-	if err := srv.Register(coordinatorKey, "DialingCoordinator", &mixnet.CoordinatorService{dialingMixnet}); err != nil {
-		log.Fatalf("vrpc.Register: %s", err)
-	}
-	if err := srv.Register(coordinatorKey, "AddFriendCoordinator", &mixnet.CoordinatorService{addFriendMixnet}); err != nil {
-		log.Fatalf("vrpc.Register: %s", err)
-	}
-
-	if err := srv.Register(prevServerKey, "DialingChain", &mixnet.ChainService{dialingMixnet}); err != nil {
-		log.Fatalf("vrpc.Register: %s", err)
-	}
-	if err := srv.Register(prevServerKey, "AddFriendChain", &mixnet.ChainService{addFriendMixnet}); err != nil {
-		log.Fatalf("vrpc.Register: %s", err)
-	}
-
-	err = srv.ListenAndServe(conf.ListenAddr, conf.PrivateKey)
+	log.Printf("Listening on %q", conf.ListenAddr)
+	listener, err := net.Listen("tcp", conf.ListenAddr)
 	if err != nil {
-		log.Fatal("ListenAndServe:", err)
+		log.Fatalf("net.Listen: %s", err)
 	}
+
+	err = grpcServer.Serve(listener)
+	log.Fatal(err)
 }

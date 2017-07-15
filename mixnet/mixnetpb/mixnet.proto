@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package mixnetpb;
+
+import "github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+service Mixnet {
+	rpc NewRound(NewRoundRequest) returns (NewRoundResponse) {}
+	rpc SetRoundSettings(SetRoundSettingsRequest) returns (RoundSettingsSignature) {}
+
+	rpc AddOnions(AddOnionsRequest) returns (Nothing) {}
+	rpc CloseRound(CloseRoundRequest) returns (CloseRoundResponse) {}
+}
+
+message Nothing {}
+
+message NewRoundRequest {
+	string service = 1;
+	uint32 round = 2;
+}
+
+message NewRoundResponse {
+	bytes onion_key = 1;
+}
+
+message RoundSettings {
+	string service = 1;
+	uint32 round = 2;
+	uint32 num_mailboxes = 3;
+	repeated bytes onion_keys = 4;
+}
+
+message SetRoundSettingsRequest {
+	RoundSettings settings = 1;
+}
+
+message RoundSettingsSignature {
+	bytes signature = 1;
+}
+
+message AddOnionsRequest {
+	string service = 1;
+	uint32 round = 2;
+	repeated bytes onions = 3;
+}
+
+message CloseRoundRequest {
+	string service = 1;
+	uint32 round = 2;
+}
+
+message CloseRoundResponse {
+	string base_url = 1 [(gogoproto.customname) = "BaseURL"];
+}

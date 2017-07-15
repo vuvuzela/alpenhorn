@@ -2,111 +2,173 @@
 // Use of this source code is governed by the GNU AGPL
 // license that can be found in the LICENSE file.
 
-package mixnet
+package mixnet_test
 
 import (
+	"bytes"
+	"context"
 	"crypto/rand"
-	"net"
-	"net/rpc"
-	"reflect"
-	"strings"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"net/url"
 	"testing"
 
+	"github.com/davidlazar/go-crypto/encoding/base32"
 	"golang.org/x/crypto/ed25519"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"vuvuzela.io/alpenhorn/addfriend"
+	"vuvuzela.io/alpenhorn/edhttp"
+	"vuvuzela.io/alpenhorn/errors"
+	"vuvuzela.io/alpenhorn/internal/mock"
+	"vuvuzela.io/alpenhorn/mixnet"
+	"vuvuzela.io/concurrency"
+	"vuvuzela.io/crypto/onionbox"
 )
 
-type mixer struct{}
+func TestMixnet(t *testing.T) {
+	coordinatorPublic, coordinatorPrivate, _ := ed25519.GenerateKey(rand.Reader)
 
-func (m *mixer) Service() string {
-	return "TestMixer"
+	testCDN := mock.LaunchCDN("", coordinatorPublic)
+
+	mixchain := mock.LaunchMixchain(3, testCDN.Addr, coordinatorPublic, testCDN.PublicKey)
+
+	coordinatorLoop(coordinatorPrivate, mixchain, testCDN)
 }
 
-func (m *mixer) MessageSize() int {
-	return 1
+func newBucket(coordinatorKey ed25519.PrivateKey, cdn *mock.CDN, lastServerKey ed25519.PublicKey, round uint32) {
+	url := fmt.Sprintf("https://%s/newbucket?bucket=%s/%d&uploader=%s",
+		cdn.Addr,
+		"AddFriend",
+		round,
+		base32.EncodeToString(lastServerKey),
+	)
+	resp, err := (&edhttp.Client{
+		Key: coordinatorKey,
+	}).Post(cdn.PublicKey, url, "", nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := ioutil.ReadAll(resp.Body)
+		log.Fatalf("creating cdn bucket failed: %s: %q", resp.Status, msg)
+	}
 }
-func (m *mixer) FillWithNoise(dest [][]byte, noiseCounts []uint32, nextKeys []*[32]byte) {
+
+func coordinatorLoop(coordinatorKey ed25519.PrivateKey, mixchain *mock.Mixchain, cdn *mock.CDN) {
+	coordinatorClient := &mixnet.Client{
+		Key: coordinatorKey,
+	}
+
+	for round := uint32(1); round < 10; round++ {
+		newBucket(coordinatorKey, cdn, mixchain.Servers[len(mixchain.Servers)-1].Key, round)
+
+		settings := &mixnet.RoundSettings{
+			Service:      "AddFriend",
+			Round:        round,
+			NumMailboxes: 1,
+		}
+		sigs, err := coordinatorClient.NewRound(context.Background(), mixchain.Servers, settings)
+		if err != nil {
+			log.Fatalf("mixnet.NewRound: %s", err)
+		}
+		settingsMsg := settings.SigningMessage()
+		for i, sig := range sigs {
+			if !ed25519.Verify(mixchain.Servers[i].Key, settingsMsg, sig) {
+				log.Fatalf("failed to verify round settings from mixer %d", i+1)
+			}
+		}
+
+		msg, onion := makeAddFriendOnion(settings)
+		url, err := coordinatorClient.RunRound(context.Background(), mixchain.Servers[0], "AddFriend", round, [][]byte{onion})
+		if err != nil {
+			log.Fatalf("mixnet.RunRound: %s", err)
+		}
+
+		msgs := fetchMailbox(cdn.PublicKey, url, 1, addfriend.SizeEncryptedIntro)
+		msgIndex := -1
+		for i, in := range msgs {
+			if bytes.Equal(in, msg) {
+				msgIndex = i
+				break
+			}
+
+		}
+		if msgIndex == -1 {
+			log.Fatalf("did not find our message at %s", url)
+		}
+		log.Printf("found our message at position %d", msgIndex)
+	}
+}
+
+func fetchMailbox(cdnKey ed25519.PublicKey, baseURL string, mailbox uint32, msgSize int) (msgs [][]byte) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		log.Fatalf("parsing base url: %s", err)
+	}
+	vals := u.Query()
+	vals.Set("key", fmt.Sprintf("%d", mailbox))
+	u.RawQuery = vals.Encode()
+
+	resp, err := (&edhttp.Client{}).Get(cdnKey, u.String())
+	if err != nil {
+		log.Fatalf("http.Get: %s", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("failed to fetch mailbox: %s", err)
+	}
+
+	spans := concurrency.Spans(len(data), msgSize)
+	msgs = make([][]byte, len(spans))
+	for i, span := range spans {
+		msgs[i] = data[span.Start : span.Start+span.Count]
+	}
 	return
 }
-func (m *mixer) SortMessages(messages [][]byte) (mailboxes map[string][]byte) {
-	return nil
+
+var zeroNonce = new([24]byte)
+
+func makeAddFriendOnion(settings *mixnet.RoundSettings) (msg []byte, onion []byte) {
+	msg = make([]byte, addfriend.SizeEncryptedIntro)
+	rand.Read(msg)
+	mixMessage := addfriend.MixMessage{
+		Mailbox: 1,
+	}
+	copy(mixMessage.EncryptedIntro[:], msg)
+
+	data, _ := mixMessage.MarshalBinary()
+	onion, _ = onionbox.Seal(data, zeroNonce, settings.OnionKeys)
+	return
 }
 
-// Test that the entry server can only access the NewRound and
-// SetRoundSettings RPCs, but not Add or Close.
-func TestAccessControl(t *testing.T) {
-	_, serverKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
+func TestAuth(t *testing.T) {
+	coordinatorPublic, _, _ := ed25519.GenerateKey(rand.Reader)
+	_, badPrivate, _ := ed25519.GenerateKey(rand.Reader)
+
+	mixchain := mock.LaunchMixchain(3, "no-cdn", coordinatorPublic, nil)
+
+	badClient := &mixnet.Client{
+		Key: badPrivate,
 	}
 
-	mixServer := &Server{
-		SigningKey: serverKey,
-		NumServers: 1,
-		Mixer:      new(mixer),
+	_, err := badClient.NewRound(context.Background(), mixchain.Servers, &mixnet.RoundSettings{
+		Service:      "AddFriend",
+		Round:        42,
+		NumMailboxes: 1,
+	})
+	err = errors.Cause(err)
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("unexpected error: %s", err)
 	}
-	coordinatorService := &CoordinatorService{mixServer}
-	chainService := &ChainService{mixServer}
-
-	typ := reflect.TypeOf(coordinatorService)
-	if typ.NumMethod() != 2 {
-		t.Fatalf("CoordinatorService type should have 2 methods, but it has %d", typ.NumMethod())
-	}
-
-	client, server := net.Pipe()
-
-	rpcServer := new(rpc.Server)
-	if err := rpcServer.RegisterName("AddFriendCoordinator", coordinatorService); err != nil {
-		t.Fatalf("rpc.Register: %s", err)
-	}
-	if err := rpcServer.RegisterName("AddFriendChain", chainService); err != nil {
-		t.Fatalf("rpc.Register: %s", err)
-	}
-	go rpcServer.ServeConn(server)
-
-	rpcClient := rpc.NewClient(client)
-
-	settings := &RoundSettings{
-		Round: 1,
-	}
-
-	{
-		args := &NewRoundArgs{
-			Round: 1,
-		}
-		reply := new(NewRoundReply)
-		err := rpcClient.Call("AddFriendCoordinator.NewRound", args, reply)
-		if err != nil {
-			t.Fatalf("AddFriend.NewRound: %s", err)
-		}
-		settings.OnionKeys = []*[32]byte{reply.OnionKey}
-	}
-
-	{
-		reply := new(SetRoundSettingsReply)
-		err := rpcClient.Call("AddFriendCoordinator.SetRoundSettings", settings, reply)
-		if err != nil {
-			t.Fatalf("AddFriend.SetRoundSettings: %s", err)
-		}
-	}
-
-	{
-		args := new(AddArgs)
-		err := rpcClient.Call("AddFriendCoordinator.Add", args, nil)
-		if err == nil {
-			t.Fatalf("entry server should not have access to Add RPC")
-		}
-		if !strings.Contains(err.Error(), "can't find method AddFriendCoordinator.Add") {
-			t.Fatalf("unexpected error from AddFriend.Add RPC: %s", err)
-		}
-	}
-
-	{
-		args := &AddArgs{
-			Round: 1,
-		}
-		err := rpcClient.Call("AddFriendChain.Add", args, nil)
-		if err != nil {
-			t.Fatalf("AddFriendChain.Add: %s", err)
-		}
+	if st.Code() != codes.Unauthenticated {
+		t.Fatalf("unexpected status: %s", st)
 	}
 }
