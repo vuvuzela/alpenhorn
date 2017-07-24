@@ -8,18 +8,24 @@ import (
 	"encoding/json"
 	"io/ioutil"
 
+	"golang.org/x/crypto/ed25519"
+
+	"vuvuzela.io/alpenhorn/coordinator"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/internal/ioutil2"
-
-	"golang.org/x/crypto/ed25519"
 )
 
 type persistedState struct {
 	Username           string
 	LongTermPublicKey  ed25519.PublicKey
 	LongTermPrivateKey ed25519.PrivateKey
+	PKGLoginKey        ed25519.PrivateKey
 
-	ConnectionSettings ConnectionSettings
+	CoordinatorAddress string
+	CoordinatorKey     ed25519.PublicKey
+
+	AddFriendConfig *coordinator.AlpenhornConfig
+	DialingConfig   *coordinator.AlpenhornConfig
 
 	IncomingFriendRequests []*IncomingFriendRequest
 	OutgoingFriendRequests []*OutgoingFriendRequest
@@ -61,8 +67,16 @@ func (c *Client) loadStateLocked(st *persistedState) {
 	c.Username = st.Username
 	c.LongTermPublicKey = st.LongTermPublicKey
 	c.LongTermPrivateKey = st.LongTermPrivateKey
+	c.PKGLoginKey = st.PKGLoginKey
 
-	c.ConnectionSettings = st.ConnectionSettings
+	c.CoordinatorAddress = st.CoordinatorAddress
+	c.CoordinatorKey = st.CoordinatorKey
+
+	c.addFriendConfig = st.AddFriendConfig
+	c.addFriendConfigHash = st.AddFriendConfig.Hash()
+
+	c.dialingConfig = st.DialingConfig
+	c.dialingConfigHash = st.DialingConfig.Hash()
 
 	c.incomingFriendRequests = st.IncomingFriendRequests
 	c.outgoingFriendRequests = st.OutgoingFriendRequests
@@ -122,8 +136,13 @@ func (c *Client) persistClient() error {
 		Username:           c.Username,
 		LongTermPublicKey:  c.LongTermPublicKey,
 		LongTermPrivateKey: c.LongTermPrivateKey,
+		PKGLoginKey:        c.PKGLoginKey,
 
-		ConnectionSettings: c.ConnectionSettings,
+		CoordinatorAddress: c.CoordinatorAddress,
+		CoordinatorKey:     c.CoordinatorKey,
+
+		AddFriendConfig: c.addFriendConfig,
+		DialingConfig:   c.dialingConfig,
 
 		IncomingFriendRequests: c.incomingFriendRequests,
 		OutgoingFriendRequests: c.outgoingFriendRequests,

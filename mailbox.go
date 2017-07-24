@@ -11,10 +11,11 @@ import (
 	"io/ioutil"
 	"net/url"
 
+	"vuvuzela.io/alpenhorn/coordinator"
 	"vuvuzela.io/alpenhorn/errors"
 )
 
-func (c *Client) fetchMailbox(baseURL string, mailboxID uint32) ([]byte, error) {
+func (c *Client) fetchMailbox(cdnConfig coordinator.CDNServerConfig, baseURL string, mailboxID uint32) ([]byte, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, errors.Wrap(err, "parsing mailbox url")
@@ -23,7 +24,7 @@ func (c *Client) fetchMailbox(baseURL string, mailboxID uint32) ([]byte, error) 
 	vals.Set("key", fmt.Sprintf("%d", mailboxID))
 	u.RawQuery = vals.Encode()
 
-	resp, err := c.cdnClient.Get(u.String())
+	resp, err := c.edhttpClient.Get(cdnConfig.Key, u.String())
 	if err != nil {
 		return nil, errors.Wrap(err, "http get mailbox")
 	}

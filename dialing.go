@@ -10,6 +10,7 @@ import (
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/bloom"
 	"vuvuzela.io/alpenhorn/coordinator"
@@ -19,24 +20,83 @@ import (
 	"vuvuzela.io/crypto/onionbox"
 )
 
+type dialingRoundState struct {
+	Round  uint32
+	Config *coordinator.AlpenhornConfig
+}
+
 func (c *Client) dialingMux() typesocket.Mux {
 	return typesocket.NewMux(map[string]interface{}{
-		"mix":     c.sendDialingOnion,
-		"mailbox": c.scanBloomFilter,
-		"error":   c.dialingRoundError,
+		"newround": c.newDialingRound,
+		"mix":      c.sendDialingOnion,
+		"mailbox":  c.scanBloomFilter,
+		"error":    c.dialingRoundError,
 	})
 }
 
 func (c *Client) dialingRoundError(conn typesocket.Conn, v coordinator.RoundError) {
-	log.Printf("dialing round error: %#v", v)
+	log.Errorf("dialing round error: %#v", v)
+}
+
+func (c *Client) newDialingRound(conn typesocket.Conn, v coordinator.NewRound) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	st, ok := c.dialingRounds[v.Round]
+	if ok {
+		if st.Config.Hash() != v.ConfigHash {
+			c.Handler.Error(errors.New("coordinator announced different configs round %d", v.Round))
+		}
+		return
+	}
+
+	// common case
+	if v.ConfigHash == c.dialingConfigHash {
+		c.dialingRounds[v.Round] = &dialingRoundState{
+			Round:  v.Round,
+			Config: c.dialingConfig,
+		}
+		return
+	}
+
+	config, err := c.fetchAndVerifyConfig(c.dialingConfig, v.ConfigHash)
+	if err != nil {
+		c.Handler.Error(errors.Wrap(err, "fetching dialing config"))
+		return
+	}
+
+	c.dialingRounds[v.Round] = &dialingRoundState{
+		Round:  v.Round,
+		Config: config,
+	}
+
+	c.dialingConfig = config
+	c.dialingConfigHash = v.ConfigHash
+
+	if err := c.persistLocked(); err != nil {
+		panic("failed to persist state: " + err.Error())
+	}
 }
 
 func (c *Client) sendDialingOnion(conn typesocket.Conn, v coordinator.MixRound) {
 	round := v.MixSettings.Round
 
-	for i, mixKey := range c.Mixers {
-		if !v.MixSettings.Verify(mixKey, v.MixSignatures[i]) {
-			err := errors.New("failed to verify mixnet settings: round %d, key %s", round, base32.EncodeToString(mixKey))
+	c.mu.Lock()
+	st, ok := c.dialingRounds[round]
+	c.mu.Unlock()
+	if !ok {
+		c.Handler.Error(errors.New("sendDialingOnion: round %d not configured", round))
+		return
+	}
+
+	settingsMsg := v.MixSettings.SigningMessage()
+
+	for i, mixer := range st.Config.MixServers {
+		if !ed25519.Verify(mixer.Key, settingsMsg, v.MixSignatures[i]) {
+			err := errors.New(
+				"round %d: failed to verify mixnet settings for key %s",
+				round, base32.EncodeToString(mixer.Key),
+			)
 			c.Handler.Error(err)
 			return
 		}
@@ -91,8 +151,15 @@ func (c *Client) nextOutgoingCall(round uint32) *OutgoingCall {
 }
 
 func (c *Client) scanBloomFilter(conn typesocket.Conn, v coordinator.MailboxURL) {
+	c.mu.Lock()
+	st, ok := c.dialingRounds[v.Round]
+	c.mu.Unlock()
+	if !ok {
+		return
+	}
+
 	mailboxID := usernameToMailbox(c.Username, v.NumMailboxes)
-	mailbox, err := c.fetchMailbox(v.URL, mailboxID)
+	mailbox, err := c.fetchMailbox(st.Config.CDNServer, v.URL, mailboxID)
 	if err != nil {
 		c.Handler.Error(errors.Wrap(err, "fetching mailbox"))
 		return

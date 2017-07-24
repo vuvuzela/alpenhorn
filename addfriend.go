@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding"
 	"encoding/hex"
+	"sync"
 	"sync/atomic"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
@@ -28,7 +29,10 @@ import (
 )
 
 type addFriendRoundState struct {
-	Round            uint32
+	Round  uint32
+	Config *coordinator.AlpenhornConfig
+
+	mu               sync.Mutex
 	ServerMasterKeys []*ibe.MasterPublicKey
 	PrivateKeys      []*ibe.IdentityPrivateKey
 	ServerBLSKeys    []*bls.PublicKey
@@ -37,45 +41,155 @@ type addFriendRoundState struct {
 
 func (c *Client) addFriendMux() typesocket.Mux {
 	return typesocket.NewMux(map[string]interface{}{
-		"pkg":     c.extractPKGKeys,
-		"mix":     c.sendAddFriendOnion,
-		"mailbox": c.scanMailbox,
-		"error":   c.addFriendRoundError,
+		"newround": c.newAddFriendRound,
+		"pkg":      c.extractPKGKeys,
+		"mix":      c.sendAddFriendOnion,
+		"mailbox":  c.scanMailbox,
+		"error":    c.addFriendRoundError,
 	})
 }
 
 func (c *Client) addFriendRoundError(conn typesocket.Conn, v coordinator.RoundError) {
-	log.Printf("addfriend round error: %#v", v)
+	log.Errorf("addfriend round error: %#v", v)
+}
+
+func (c *Client) newAddFriendRound(conn typesocket.Conn, v coordinator.NewRound) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	st, ok := c.addFriendRounds[v.Round]
+	if ok {
+		if st.Config.Hash() != v.ConfigHash {
+			c.Handler.Error(errors.New("coordinator announced different configs round %d", v.Round))
+		}
+		return
+	}
+
+	// common case
+	if v.ConfigHash == c.addFriendConfigHash {
+		c.addFriendRounds[v.Round] = &addFriendRoundState{
+			Round:  v.Round,
+			Config: c.addFriendConfig,
+		}
+		return
+	}
+
+	config, err := c.fetchAndVerifyConfig(c.addFriendConfig, v.ConfigHash)
+	if err != nil {
+		c.Handler.Error(errors.Wrap(err, "fetching addfriend config"))
+		return
+	}
+
+	c.addFriendRounds[v.Round] = &addFriendRoundState{
+		Round:  v.Round,
+		Config: config,
+	}
+
+	c.loadAddFriendConfig(config)
+}
+
+// assumes c.mu is locked
+func (c *Client) loadAddFriendConfig(config *coordinator.AlpenhornConfig) {
+	c.addFriendConfig = config
+	c.addFriendConfigHash = config.Hash()
+
+	if c.registrations == nil {
+		c.registrations = make(map[string]*pkg.Client)
+	}
+
+	for _, pkgServer := range config.PKGServers {
+		id := regid(pkgServer.Key, c.Username)
+		pkgc := c.registrations[id]
+		if pkgc != nil {
+			continue
+		}
+
+		pkgc = &pkg.Client{
+			PublicServerConfig: pkgServer,
+			Username:           c.Username,
+			LoginKey:           c.PKGLoginKey,
+			UserLongTermKey:    c.LongTermPublicKey,
+		}
+
+		err := pkgc.CheckStatus()
+		if err == nil {
+			// This is a new PKG that has copied our registration from another PKG.
+			c.registrations[id] = pkgc
+			continue
+		}
+
+		pkgErr, ok := err.(pkg.Error)
+		if ok && pkgErr.Code == pkg.ErrNotRegistered {
+			err := pkgc.Register()
+			if err != nil {
+				c.Handler.Error(errors.Wrap(err, "failed to register with PKG %s", pkgServer.Address))
+				continue
+			}
+			log.Infof("Registered %q with new PKG %s", c.Username, pkgServer.Address)
+			c.registrations[id] = pkgc
+		} else {
+			c.Handler.Error(errors.Wrap(err, "failed to check account status with PKG %s", pkgServer.Address))
+		}
+	}
+
+	if err := c.persistLocked(); err != nil {
+		panic("failed to persist state: " + err.Error())
+	}
 }
 
 func (c *Client) extractPKGKeys(conn typesocket.Conn, v coordinator.PKGRound) {
-	pkgKeys := make([]ed25519.PublicKey, len(c.pkgClients))
+	c.mu.Lock()
+	st, ok := c.addFriendRounds[v.Round]
+	c.mu.Unlock()
+	if !ok {
+		c.Handler.Error(errors.New("extractPKGKeys: round %d not configured", v.Round))
+		return
+	}
+
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.PrivateKeys != nil {
+		return
+	}
+
+	numPKGs := len(st.Config.PKGServers)
+	pkgKeys := make([]ed25519.PublicKey, numPKGs)
 	for i := range pkgKeys {
-		pkgKeys[i] = c.pkgClients[i].ServerKey
+		pkgKeys[i] = st.Config.PKGServers[i].Key
 	}
 	if !v.PKGSettings.Verify(v.Round, pkgKeys) {
-		err := errors.New("failed to verify PKG settings: round %d", v.Round)
+		err := errors.New("round %d: failed to verify PKG settings", v.Round)
 		c.Handler.Error(err)
 		return
 	}
 
-	st := &addFriendRoundState{
-		Round:            v.Round,
-		ServerMasterKeys: make([]*ibe.MasterPublicKey, len(c.pkgClients)),
-		PrivateKeys:      make([]*ibe.IdentityPrivateKey, len(c.pkgClients)),
-		ServerBLSKeys:    make([]*bls.PublicKey, len(c.pkgClients)),
-		IdentitySigs:     make([]bls.Signature, len(c.pkgClients)),
-	}
+	st.ServerMasterKeys = make([]*ibe.MasterPublicKey, numPKGs)
+	st.PrivateKeys = make([]*ibe.IdentityPrivateKey, numPKGs)
+	st.ServerBLSKeys = make([]*bls.PublicKey, numPKGs)
+	st.IdentitySigs = make([]bls.Signature, numPKGs)
 
 	id := pkg.ValidUsernameToIdentity(c.Username)
 
-	for i, pkgc := range c.pkgClients {
-		extractResult, err := pkgc.Extract(v.Round)
-		if err != nil {
-			log.Printf("extract error: %s", err)
+	for i, pkgServer := range st.Config.PKGServers {
+		c.mu.Lock()
+		pkgc := c.registrations[regid(pkgServer.Key, c.Username)]
+		c.mu.Unlock()
+
+		if pkgc == nil {
+			// TODO we need a way to retry extraction for these kinds of errors.
+			c.Handler.Error(errors.New("no registration for PKG %s", pkgServer.Address))
 			return
 		}
-		hexkey := hex.EncodeToString(pkgc.ServerKey)
+
+		// TODO short-term hack until we rewrite the PKG client
+		pkgc.UserLongTermKey = c.LongTermPublicKey
+
+		extractResult, err := pkgc.Extract(v.Round)
+		if err != nil {
+			c.Handler.Error(errors.Wrap(err, "round %d: error extracting private key from %s", v.Round, pkgc.Address))
+			return
+		}
+		hexkey := hex.EncodeToString(pkgc.PublicServerConfig.Key)
 		st.ServerMasterKeys[i] = v.PKGSettings[hexkey].MasterPublicKey
 		st.ServerBLSKeys[i] = v.PKGSettings[hexkey].BLSPublicKey
 		st.PrivateKeys[i] = extractResult.PrivateKey
@@ -86,41 +200,41 @@ func (c *Client) extractPKGKeys(conn typesocket.Conn, v coordinator.PKGRound) {
 			UserLongTermKey: c.LongTermPublicKey,
 		}
 		if !bls.Verify(st.ServerBLSKeys[i:i+1], [][]byte{attestation.Marshal()}, extractResult.IdentitySig) {
-			log.Printf("pkg %s gave us an invalid identity signature", pkgc.ServerAddr)
+			log.Errorf("pkg %s gave us an invalid identity signature", pkgc.Address)
 			return
 		}
 		st.IdentitySigs[i] = extractResult.IdentitySig
 	}
-
-	c.mu.Lock()
-	c.addFriendRounds[v.Round] = st
-	c.mu.Unlock()
 }
 
 var zeroNonce = new([24]byte)
 
 func (c *Client) sendAddFriendOnion(conn typesocket.Conn, v coordinator.MixRound) {
-	for i, mixKey := range c.Mixers {
-		if !v.MixSettings.Verify(mixKey, v.MixSignatures[i]) {
-			err := errors.New(
-				"failed to verify mixnet settings: round %d, key %s",
-				v.MixSettings.Round, base32.EncodeToString(mixKey),
-			)
-			c.Handler.Error(err)
-			return
-		}
-	}
-
 	round := v.MixSettings.Round
 
 	c.mu.Lock()
 	st, ok := c.addFriendRounds[round]
 	c.mu.Unlock()
 	if !ok {
-		//err := errors.New("sendOnion: round %d not found", round)
-		//c.Handler.Error(err)
+		c.Handler.Error(errors.New("sendAddFriendOnion: round %d not configured", round))
 		return
 	}
+
+	settingsMsg := v.MixSettings.SigningMessage()
+
+	for i, mixer := range st.Config.MixServers {
+		if !ed25519.Verify(mixer.Key, settingsMsg, v.MixSignatures[i]) {
+			err := errors.New(
+				"round %d: failed to verify mixnet settings for key %s",
+				round, base32.EncodeToString(mixer.Key),
+			)
+			c.Handler.Error(err)
+			return
+		}
+	}
+
+	st.mu.Lock()
+	defer st.mu.Unlock()
 
 	outgoingReq := c.nextOutgoingFriendRequest()
 	intro, sentReq := c.genIntro(st, outgoingReq)
@@ -233,15 +347,17 @@ func (c *Client) scanMailbox(conn typesocket.Conn, v coordinator.MailboxURL) {
 	}
 
 	mailboxID := usernameToMailbox(c.Username, v.NumMailboxes)
-	mailbox, err := c.fetchMailbox(v.URL, mailboxID)
+	mailbox, err := c.fetchMailbox(st.Config.CDNServer, v.URL, mailboxID)
 	if err != nil {
 		c.Handler.Error(errors.Wrap(err, "fetching mailbox"))
 		return
 	}
 
-	intros := concurrency.Spans(len(mailbox), addfriend.SizeEncryptedIntro)
+	st.mu.Lock()
 	privKey := new(ibe.IdentityPrivateKey).Aggregate(st.PrivateKeys...)
+	st.mu.Unlock()
 
+	intros := concurrency.Spans(len(mailbox), addfriend.SizeEncryptedIntro)
 	//log.WithFields(log.Fields{"round": v.Round, "intros": len(intros), "mailbox": mailboxID}).Info("Scanning mailbox")
 	concurrency.ParallelFor(len(intros), func(p *concurrency.P) {
 		for i, ok := p.Next(); ok; i, ok = p.Next() {
@@ -258,18 +374,18 @@ func (c *Client) scanMailbox(conn typesocket.Conn, v coordinator.MailboxURL) {
 				continue
 			}
 
-			c.decodeAddFriendMessage(msg, st.ServerBLSKeys)
+			c.decodeAddFriendMessage(msg, st.Config.PKGServers, st.ServerBLSKeys)
 		}
 	})
 }
 
-func (c *Client) decodeAddFriendMessage(msg []byte, serverKeys []*bls.PublicKey) {
+func (c *Client) decodeAddFriendMessage(msg []byte, verifiers []pkg.PublicServerConfig, multisigKeys []*bls.PublicKey) {
 	intro := new(introduction)
 	if err := intro.UnmarshalBinary(msg); err != nil {
 		return
 	}
 
-	if !intro.Verify(serverKeys) {
+	if !intro.Verify(multisigKeys) {
 		log.Printf("failed to verify intro: %s", intro.Username)
 		return
 	}
@@ -280,6 +396,7 @@ func (c *Client) decodeAddFriendMessage(msg []byte, serverKeys []*bls.PublicKey)
 		LongTermKey: intro.LongTermKey[:],
 		DHPublicKey: &intro.DHPublicKey,
 		DialRound:   intro.DialingRound,
+		Verifiers:   verifiers,
 		client:      c,
 	}
 

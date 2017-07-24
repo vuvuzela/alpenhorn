@@ -8,6 +8,8 @@ import (
 	"errors"
 
 	"golang.org/x/crypto/ed25519"
+
+	"vuvuzela.io/alpenhorn/pkg"
 )
 
 // SendFriendRequest sends a friend request to the given username using
@@ -99,6 +101,7 @@ type IncomingFriendRequest struct {
 	LongTermKey ed25519.PublicKey
 	DHPublicKey *[32]byte
 	DialRound   uint32
+	Verifiers   []pkg.PublicServerConfig
 
 	client *Client
 }

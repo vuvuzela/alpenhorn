@@ -6,20 +6,18 @@
 package alpenhorn
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/ioutil"
-	"net"
-	"net/http"
 	"os"
 	"sync"
 
 	"golang.org/x/crypto/ed25519"
 
-	"vuvuzela.io/alpenhorn/edtls"
-	"vuvuzela.io/alpenhorn/errors"
+	"vuvuzela.io/alpenhorn/coordinator"
+	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/keywheel"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/alpenhorn/typesocket"
@@ -56,20 +54,14 @@ type EventHandler interface {
 	ReceivedCall(*IncomingCall)
 }
 
-type ConnectionSettings struct {
-	EntryAddr string
-	PKGAddrs  []string
-	PKGKeys   []ed25519.PublicKey
-	Mixers    []ed25519.PublicKey
-	CDNKey    ed25519.PublicKey
-}
-
 type Client struct {
 	Username           string
 	LongTermPublicKey  ed25519.PublicKey
 	LongTermPrivateKey ed25519.PrivateKey
+	PKGLoginKey        ed25519.PrivateKey
 
-	ConnectionSettings
+	CoordinatorAddress string
+	CoordinatorKey     ed25519.PublicKey
 
 	Handler EventHandler
 
@@ -92,22 +84,32 @@ type Client struct {
 	// when the client connects.
 	wheel keywheel.Wheel
 
-	pkgClients []*pkg.Client
-	cdnClient  *http.Client
+	once         sync.Once
+	edhttpClient *edhttp.Client
 
-	mu                     sync.Mutex
+	lastDialingRound uint32 // updated atomically
+
+	// mu protects everything up to the end of the struct.
+	mu sync.Mutex
+
+	addFriendRounds     map[uint32]*addFriendRoundState
+	addFriendConfigHash string
+	addFriendConfig     *coordinator.AlpenhornConfig
+	registrations       map[string]*pkg.Client
+
+	dialingRounds     map[uint32]*dialingRoundState
+	dialingConfigHash string
+	dialingConfig     *coordinator.AlpenhornConfig
+
+	friends                map[string]*Friend
 	incomingFriendRequests []*IncomingFriendRequest
 	outgoingFriendRequests []*OutgoingFriendRequest
 	sentFriendRequests     []*sentFriendRequest
 	outgoingCalls          []*OutgoingCall
-	friends                map[string]*Friend
-	registrations          map[string]*pkg.Client
 
-	addFriendRounds map[uint32]*addFriendRoundState
-	addFriendConn   typesocket.Conn
-	dialingConn     typesocket.Conn
-
-	lastDialingRound uint32 // updated atomically
+	connected     bool
+	addFriendConn typesocket.Conn
+	dialingConn   typesocket.Conn
 }
 
 func regid(serverKey ed25519.PublicKey, username string) string {
@@ -131,15 +133,14 @@ func (c *Client) Register(username string, pkgAddr string, pkgKey ed25519.Public
 		return nil
 	}
 
-	// We could use our long-term signing key as the login key, but then it
-	// would have to be always online.
-	_, loginPrivateKey, _ := ed25519.GenerateKey(rand.Reader)
-
 	pkgc := &pkg.Client{
-		ServerAddr: pkgAddr,
-		ServerKey:  pkgKey,
-		Username:   c.Username,
-		LoginKey:   loginPrivateKey,
+		PublicServerConfig: pkg.PublicServerConfig{
+			Key:     pkgKey,
+			Address: pkgAddr,
+		},
+		Username:        c.Username,
+		LoginKey:        c.PKGLoginKey,
+		UserLongTermKey: c.LongTermPublicKey,
 	}
 	err := pkgc.Register()
 	if err != nil {
@@ -166,6 +167,30 @@ func (c *Client) getRegistration(username string, serverKey ed25519.PublicKey) *
 // connection settings and starts participating in the add-friend and
 // dialing protocols.
 func (c *Client) Connect() error {
+	c.once.Do(func() {
+		c.edhttpClient = new(edhttp.Client)
+	})
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.connected {
+		return errors.New("already connected")
+	}
+
+	if c.CoordinatorAddress == "" {
+		return errors.New("no coordinator address")
+	}
+	if len(c.CoordinatorKey) != ed25519.PublicKeySize {
+		return errors.New("no coordinator key")
+	}
+	if c.addFriendConfig == nil {
+		return errors.New("no addfriend config")
+	}
+	if c.dialingConfig == nil {
+		return errors.New("no dialing config")
+	}
+
 	if c.KeywheelPersistPath != "" {
 		keywheelData, err := ioutil.ReadFile(c.KeywheelPersistPath)
 		if os.IsNotExist(err) {
@@ -183,42 +208,46 @@ func (c *Client) Connect() error {
 		}
 	}
 
-	c.pkgClients = make([]*pkg.Client, 0, len(c.PKGKeys))
-	for i := range c.PKGKeys {
-		pkgClient := c.getRegistration(c.Username, c.PKGKeys[i])
-		if pkgClient == nil {
-			return errors.New("username %q not registered with pkg %s", c.Username, c.PKGAddrs[i])
-		}
-		pkgClient.UserLongTermKey = c.LongTermPublicKey
-		c.pkgClients = append(c.pkgClients, pkgClient)
-	}
-
-	c.cdnClient = &http.Client{
-		Transport: &http.Transport{
-			DialTLS: func(network, addr string) (net.Conn, error) {
-				return edtls.Dial(network, addr, c.CDNKey, nil)
-			},
-		},
-	}
-
 	if c.friends == nil {
 		c.friends = make(map[string]*Friend)
 	}
 
 	c.addFriendRounds = make(map[uint32]*addFriendRoundState)
-	afwsAddr := fmt.Sprintf("ws://%s/afws", c.EntryAddr)
-	addFriendConn, err := typesocket.Dial(afwsAddr, c.addFriendMux())
+	afwsAddr := fmt.Sprintf("wss://%s/addfriend/ws", c.CoordinatorAddress)
+	addFriendConn, err := typesocket.Dial(afwsAddr, c.CoordinatorKey, c.addFriendMux())
 	if err != nil {
 		return err
 	}
-	c.addFriendConn = addFriendConn
 
-	dwsAddr := fmt.Sprintf("ws://%s/dws", c.EntryAddr)
-	dialingConn, err := typesocket.Dial(dwsAddr, c.dialingMux())
+	c.dialingRounds = make(map[uint32]*dialingRoundState)
+	dwsAddr := fmt.Sprintf("wss://%s/dialing/ws", c.CoordinatorAddress)
+	dialingConn, err := typesocket.Dial(dwsAddr, c.CoordinatorKey, c.dialingMux())
 	if err != nil {
+		addFriendConn.Close()
 		return err
 	}
+
+	c.connected = true
+	c.addFriendConn = addFriendConn
 	c.dialingConn = dialingConn
 
 	return nil
+}
+
+func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.connected {
+		return errors.New("not connected")
+	}
+
+	c.connected = false
+	err1 := c.dialingConn.Close()
+	err2 := c.addFriendConn.Close()
+
+	if err1 != nil {
+		return err1
+	}
+	return err2
 }
