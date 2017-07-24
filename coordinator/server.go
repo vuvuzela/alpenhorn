@@ -6,22 +6,22 @@
 package coordinator
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
+	"github.com/davidlazar/go-crypto/encoding/base32"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/ed25519"
+	"golang.org/x/net/context"
 
+	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/mixnet"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/alpenhorn/typesocket"
-	"vuvuzela.io/alpenhorn/vrpc"
-	"vuvuzela.io/internal/ioutil2"
 )
 
 // Server is the coordinator (entry) server for the add-friend or dialing
@@ -29,28 +29,31 @@ import (
 // this might change if we find that websockets don't work well with long
 // add-friend rounds.
 type Server struct {
-	Service string // "AddFriend" or "Dialing"
+	Service    string // "AddFriend" or "Dialing"
+	PrivateKey ed25519.PrivateKey
 
-	MixServers   []*vrpc.Client
+	PKGWait      time.Duration
 	MixWait      time.Duration
+	RoundWait    time.Duration
 	NumMailboxes uint32
-
-	RoundWait time.Duration
-
-	PKGServers []*vrpc.Client
-	PKGWait    time.Duration
 
 	PersistPath string
 
-	mu             sync.Mutex
-	round          uint32
-	onions         [][]byte
-	closed         bool
-	shutdown       chan struct{}
-	latestMixRound *MixRound
-	latestPKGRound *PKGRound
+	mu                sync.Mutex
+	round             uint32
+	onions            [][]byte
+	closed            bool
+	shutdown          chan struct{}
+	latestMixRound    *MixRound
+	latestPKGRound    *PKGRound
+	allConfigs        map[string]*AlpenhornConfig // use sync.Map in 1.9
+	currentConfigHash string
 
 	hub *typesocket.Hub
+
+	mixnetClient *mixnet.Client
+	pkgClient    *pkg.CoordinatorClient
+	cdnClient    *edhttp.Client
 
 	// TODO we should keep old PKGSettings and old mailbox URLS around
 	// in case clients request them.
@@ -65,6 +68,9 @@ func (srv *Server) Run() error {
 	if srv.PersistPath == "" {
 		return errors.New("no persist path specified")
 	}
+	if srv.currentConfigHash == "" {
+		return errors.New("current config hash is empty")
+	}
 
 	mux := typesocket.NewMux(map[string]interface{}{
 		"onion": srv.incomingOnion,
@@ -73,14 +79,25 @@ func (srv *Server) Run() error {
 		Mux: mux,
 	}
 
-	round, err := loadPersistedState(srv.PersistPath)
-	if err != nil {
-		return err
+	if srv.Service == "AddFriend" {
+		srv.pkgClient = &pkg.CoordinatorClient{
+			CoordinatorKey: srv.PrivateKey,
+		}
 	}
-	srv.round = round + 1
+
+	srv.mixnetClient = &mixnet.Client{
+		Key: srv.PrivateKey,
+	}
+
+	srv.cdnClient = &edhttp.Client{
+		Key: srv.PrivateKey,
+	}
+
+	srv.mu.Lock()
 	srv.onions = make([][]byte, 0, 128)
 	srv.closed = false
 	srv.shutdown = make(chan struct{})
+	srv.mu.Unlock()
 
 	go srv.loop()
 	return nil
@@ -101,39 +118,15 @@ func (srv *Server) Close() error {
 	}
 }
 
-// version is the current version number of the persisted state format.
-const version byte = 0
-
-func loadPersistedState(path string) (round uint32, err error) {
-	data, err := ioutil.ReadFile(path)
-	if os.IsNotExist(err) {
-		return 0, persistState(path, 0)
-	} else if err != nil {
-		return 0, err
-	}
-
-	if len(data) < 5 {
-		return 0, fmt.Errorf("short data: want %d bytes, got %d", 5, len(data))
-	}
-
-	ver := data[0]
-	if ver != version {
-		return 0, fmt.Errorf("unexpected version: want version %d, got %d", version, ver)
-	}
-
-	round = binary.BigEndian.Uint32(data[1:])
-	return round, nil
-}
-
-func persistState(path string, round uint32) error {
-	var data [5]byte
-	data[0] = version
-	binary.BigEndian.PutUint32(data[1:], round)
-	return ioutil2.WriteFileAtomic(path, data[:], 0600)
-}
-
 func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	srv.hub.ServeHTTP(w, r)
+	switch r.URL.Path {
+	case "/ws":
+		srv.hub.ServeHTTP(w, r)
+	case "/config":
+		srv.getConfigsHandler(w, r)
+	case "/newconfig":
+		srv.newConfigHandler(w, r)
+	}
 }
 
 type OnionMsg struct {
@@ -141,9 +134,14 @@ type OnionMsg struct {
 	Onion []byte
 }
 
+type NewRound struct {
+	Round      uint32
+	ConfigHash string
+}
+
 type PKGRound struct {
 	Round       uint32
-	PKGSettings pkg.PKGSettings
+	PKGSettings pkg.RoundSettings
 }
 
 type MixRound struct {
@@ -199,25 +197,56 @@ func (srv *Server) incomingOnion(c typesocket.Conn, o OnionMsg) {
 	}
 }
 
-func (srv *Server) loop() {
-	round := srv.round
+func (srv *Server) prepCDN(config *AlpenhornConfig, round uint32) error {
+	lastMixer := config.MixServers[len(config.MixServers)-1]
+	url := fmt.Sprintf("https://%s/newbucket?bucket=%s/%d&uploader=%s",
+		config.CDNServer.Address,
+		config.Service,
+		round,
+		base32.EncodeToString(lastMixer.Key),
+	)
+	resp, err := srv.cdnClient.Post(config.CDNServer.Key, url, "", nil)
+	if err != nil {
+		return errors.Wrap(err, "POST error")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := ioutil.ReadAll(resp.Body)
+		return errors.New("unsuccessful status code: %s: %q", resp.Status, msg)
+	}
+	return nil
+}
 
+func (srv *Server) loop() {
 	for {
+		srv.mu.Lock()
+		srv.round++
+		round := srv.round
 		logger := log.WithFields(log.Fields{"service": srv.Service, "round": round})
 
-		if err := persistState(srv.PersistPath, round); err != nil {
+		configHash := srv.currentConfigHash
+		config := srv.allConfigs[configHash]
+
+		if err := srv.persistLocked(); err != nil {
 			logger.Errorf("error persisting state: %s", err)
+			srv.mu.Unlock()
 			break
 		}
+		srv.mu.Unlock()
 
 		logger.Info("starting new round")
+
+		srv.hub.Broadcast("newround", NewRound{
+			Round:      round,
+			ConfigHash: configHash,
+		})
 
 		// TODO perhaps pkg.NewRound, mixnet.NewRound, hub.Broadcast, etc
 		// should take a Context for better cancelation.
 
 		if srv.Service == "AddFriend" {
 			logger.Info("requesting PKG keys")
-			pkgSettings, err := pkg.NewRound(srv.PKGServers, round)
+			pkgSettings, err := srv.pkgClient.NewRound(config.PKGServers, round)
 			if err != nil {
 				logger.WithFields(log.Fields{"call": "pkg.NewRound"}).Error(err)
 				if !srv.sleep(10 * time.Second) {
@@ -241,11 +270,18 @@ func (srv *Server) loop() {
 			}
 		}
 
+		err := srv.prepCDN(config, round)
+		if err != nil {
+			log.Errorf("error preparing CDN for round: %s", err)
+			break
+		}
+
 		mixSettings := mixnet.RoundSettings{
+			Service:      srv.Service,
 			Round:        round,
 			NumMailboxes: srv.NumMailboxes,
 		}
-		mixSigs, err := mixnet.NewRound(srv.Service, srv.MixServers, &mixSettings)
+		mixSigs, err := srv.mixnetClient.NewRound(context.Background(), config.MixServers, &mixSettings)
 		if err != nil {
 			logger.WithFields(log.Fields{"call": "mixnet.NewRound"}).Error(err)
 			if !srv.sleep(10 * time.Second) {
@@ -273,10 +309,7 @@ func (srv *Server) loop() {
 
 		logger.Info("running round")
 		srv.mu.Lock()
-		go srv.runRound(round, srv.onions)
-
-		round++
-		srv.round = round
+		go srv.runRound(context.Background(), config.MixServers[0], round, srv.onions)
 		srv.onions = make([][]byte, 0, len(srv.onions))
 		srv.mu.Unlock()
 
@@ -286,7 +319,7 @@ func (srv *Server) loop() {
 		}
 	}
 
-	log.WithFields(log.Fields{"service": srv.Service, "round": round}).Info("shutting down")
+	log.WithFields(log.Fields{"service": srv.Service}).Info("shutting down")
 }
 
 func (srv *Server) sleep(d time.Duration) bool {
@@ -300,12 +333,12 @@ func (srv *Server) sleep(d time.Duration) bool {
 	}
 }
 
-func (srv *Server) runRound(round uint32, onions [][]byte) {
+func (srv *Server) runRound(ctx context.Context, firstServer mixnet.PublicServerConfig, round uint32, onions [][]byte) {
 	logger := log.WithFields(log.Fields{"service": srv.Service, "round": round})
 
 	logger.WithFields(log.Fields{"onions": len(onions)}).Info("start RunRound")
 	start := time.Now()
-	url, err := mixnet.RunRound(srv.Service, srv.MixServers[0], round, onions)
+	url, err := srv.mixnetClient.RunRound(ctx, firstServer, srv.Service, round, onions)
 	if err != nil {
 		logger.WithFields(log.Fields{"call": "RunRound"}).Error(err)
 		srv.hub.Broadcast("error", RoundError{Round: round, Err: "server error"})

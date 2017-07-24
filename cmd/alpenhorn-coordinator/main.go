@@ -12,31 +12,27 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
-	"runtime"
 	"text/template"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 
-	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/coordinator"
+	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
-	"vuvuzela.io/alpenhorn/vrpc"
 )
 
 var (
-	globalConfPath = flag.String("global", "", "global config file")
-	confPath       = flag.String("conf", "", "config file")
-	doinit         = flag.Bool("init", false, "create config file")
+	bootstrapPath = flag.String("bootstrap", "", "path to bootstrap config")
 )
 
 type Config struct {
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
 	ListenAddr string
-	PersistDir string
 
 	AddFriendDelay time.Duration
 	DialingDelay   time.Duration
@@ -56,7 +52,6 @@ const confTemplate = `# Alpenhorn coordinator (entry) server config
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
 listenAddr = {{.ListenAddr | printf "%q"}}
-persistDir = {{.PersistDir | printf "%q" }}
 
 addFriendDelay = {{.AddFriendDelay | printf "%q"}}
 dialingDelay   = {{.DialingDelay | printf "%q"}}
@@ -73,7 +68,97 @@ addFriendMailboxes = {{.AddFriendMailboxes}}
 dialingMailboxes   = {{.DialingMailboxes}}
 `
 
-func writeNewConfig() {
+type BootstrapConfig struct {
+	AddFriendStartingConfig *coordinator.AlpenhornConfig `mapstructure:"AddFriend"`
+	DialingStartingConfig   *coordinator.AlpenhornConfig `mapstructure:"Dialing"`
+}
+
+func doBootstrap() {
+	u, err := user.Current()
+	if err != nil {
+		log.Fatal(err)
+	}
+	confHome := filepath.Join(u.HomeDir, ".alpenhorn")
+
+	confPath := filepath.Join(confHome, "coordinator.conf")
+	addFriendStatePath := filepath.Join(confHome, "coordinator-addfriend-state")
+	dialingStatePath := filepath.Join(confHome, "coordinator-dialing-state")
+
+	doConf := overwrite(confPath)
+	doAddFriend := overwrite(addFriendStatePath)
+	doDialing := overwrite(dialingStatePath)
+
+	if !doConf && !doAddFriend && !doDialing {
+		fmt.Println("Nothing to do.")
+		os.Exit(0)
+	}
+
+	var bootstrap *BootstrapConfig
+	if doAddFriend || doDialing {
+		if *bootstrapPath == "" {
+			fmt.Println("Please specify a bootstrap config with -bootstrap.")
+			os.Exit(1)
+		}
+
+		data, err := ioutil.ReadFile(*bootstrapPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		bootstrap = new(BootstrapConfig)
+		err = toml.Unmarshal(data, bootstrap)
+		if err != nil {
+			log.Fatalf("error decoding toml from %s: %s", *bootstrapPath, err)
+		}
+	}
+
+	err = os.Mkdir(confHome, 0700)
+	if err == nil {
+		fmt.Printf("Created directory %s\n", confHome)
+	} else if !os.IsExist(err) {
+		log.Fatal(err)
+	}
+
+	if doConf {
+		writeNewConfig(confPath)
+	}
+
+	if doAddFriend {
+		if bootstrap.AddFriendStartingConfig == nil {
+			log.Fatalf("no addfriend config defined in %s", *bootstrapPath)
+		}
+		addFriendServer := &coordinator.Server{
+			Service:     "AddFriend",
+			PersistPath: addFriendStatePath,
+		}
+		err := addFriendServer.Bootstrap(bootstrap.AddFriendStartingConfig)
+		if err != nil {
+			log.Fatalf("error bootstrapping addfriend server: %s", err)
+		}
+		fmt.Printf("Wrote initial addfriend state: %s\n", addFriendStatePath)
+	}
+
+	if doDialing {
+		if bootstrap.DialingStartingConfig == nil {
+			log.Fatalf("no dialing config defined in %s", *bootstrapPath)
+		}
+		dialingServer := &coordinator.Server{
+			Service:     "Dialing",
+			PersistPath: dialingStatePath,
+		}
+		err := dialingServer.Bootstrap(bootstrap.DialingStartingConfig)
+		if err != nil {
+			log.Fatalf("error bootstrapping dialing server: %s", err)
+		}
+		fmt.Printf("Wrote initial dialing state: %s\n", dialingStatePath)
+	}
+
+	if doConf {
+		fmt.Printf("Please edit the config file before running the server.\n")
+	}
+}
+
+func writeNewConfig(path string) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		panic(err)
@@ -83,7 +168,6 @@ func writeNewConfig() {
 		PublicKey:  publicKey,
 		PrivateKey: privateKey,
 		ListenAddr: "0.0.0.0:8000",
-		PersistDir: "/var/run/alpenhorn",
 
 		AddFriendDelay: 10 * time.Second,
 		DialingDelay:   5 * time.Second,
@@ -101,14 +185,12 @@ func writeNewConfig() {
 	if err != nil {
 		log.Fatalf("template error: %s", err)
 	}
-	data := buf.Bytes()
 
-	path := "coordinator-init.conf"
-	err = ioutil.WriteFile(path, data, 0600)
+	err = ioutil.WriteFile(path, buf.Bytes(), 0600)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("wrote %s\n", path)
+	fmt.Printf("Wrote new config file: %s\n", path)
 }
 
 func init() {
@@ -118,120 +200,119 @@ func init() {
 func main() {
 	flag.Parse()
 
-	if *doinit {
-		writeNewConfig()
+	if *bootstrapPath != "" {
+		doBootstrap()
 		return
 	}
 
-	if *globalConfPath == "" {
-		fmt.Println("specify global config file with -global")
-		os.Exit(1)
-	}
-
-	if *confPath == "" {
-		fmt.Println("specify config file with -conf")
-		os.Exit(1)
-	}
-
-	globalConf, err := config.ReadGlobalConfigFile(*globalConfPath)
+	u, err := user.Current()
 	if err != nil {
 		log.Fatal(err)
 	}
-	alpConf, err := globalConf.AlpenhornConfig()
-	if err != nil {
-		log.Fatalf("error reading alpenhorn config from %q: %s", *globalConfPath, err)
-	}
-	if len(alpConf.Mixers) == 0 {
-		log.Fatalf("no mix servers defined in global config: %s", *globalConfPath)
-	}
-	if len(alpConf.PKGs) == 0 {
-		log.Fatalf("no PKG servers defined in global config: %s", *globalConfPath)
-	}
+	confHome := filepath.Join(u.HomeDir, ".alpenhorn")
 
-	data, err := ioutil.ReadFile(*confPath)
+	confPath := filepath.Join(confHome, "coordinator.conf")
+	data, err := ioutil.ReadFile(confPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	conf := new(Config)
 	err = toml.Unmarshal(data, conf)
 	if err != nil {
-		log.Fatalf("error parsing config %q: %s", *confPath, err)
+		log.Fatalf("error parsing config %s: %s", confPath, err)
 	}
 
-	mixConns := make([]*vrpc.Client, len(alpConf.Mixers))
-	for i, mixer := range alpConf.Mixers {
-		if mixer.Key == nil || mixer.Address == "" {
-			log.Fatalf("mixer %d is missing a key or address", i+1)
-		}
-		numConns := 1
-		if i == 0 {
-			numConns = runtime.NumCPU()
-		}
-
-		log.Printf("connecting to mixer: %s", mixer.Address)
-		client, err := vrpc.Dial("tcp", mixer.Address, mixer.Key, conf.PrivateKey, numConns)
-		if err != nil {
-			log.Fatalf("vrpc.Dial: %s", err)
-		}
-		mixConns[i] = client
-	}
-
-	pkgConns := make([]*vrpc.Client, len(alpConf.PKGs))
-	for i, pkg := range alpConf.PKGs {
-		if pkg.Key == nil || pkg.CoordinatorAddress == "" {
-			log.Fatalf("PKG %d is missing a key or address", i+1)
-		}
-
-		client, err := vrpc.Dial("tcp", pkg.CoordinatorAddress, pkg.Key, conf.PrivateKey, 1)
-		log.Printf("connecting to PKG: %s", pkg.CoordinatorAddress)
-		if err != nil {
-			log.Fatalf("vrpc.Dial: %s", err)
-		}
-		pkgConns[i] = client
-	}
-
+	var addFriendServer *coordinator.Server
 	if conf.AddFriendMailboxes > 0 {
-		addFriendServer := &coordinator.Server{
-			Service:     "AddFriend",
-			PersistPath: filepath.Join(conf.PersistDir, "addfriend-coordinator-state"),
+		addFriendStatePath := filepath.Join(confHome, "coordinator-addfriend-state")
+		addFriendServer = &coordinator.Server{
+			Service:    "AddFriend",
+			PrivateKey: conf.PrivateKey,
 
-			MixServers:   mixConns,
-			MixWait:      conf.MixWait,
+			PKGWait:   conf.PKGWait,
+			MixWait:   conf.MixWait,
+			RoundWait: conf.AddFriendDelay,
+
 			NumMailboxes: conf.AddFriendMailboxes,
 
-			PKGServers: pkgConns,
-			PKGWait:    conf.PKGWait,
+			PersistPath: addFriendStatePath,
+		}
 
-			RoundWait: conf.AddFriendDelay,
-		}
-		err := addFriendServer.Run()
+		err = addFriendServer.LoadPersistedState()
 		if err != nil {
-			log.Fatalf("error starting add-friend loop: %s", err)
+			log.Fatalf("error reading addfriend state from %s: %s", addFriendStatePath, err)
 		}
-		http.Handle("/afws", addFriendServer)
+		http.Handle("/addfriend/", http.StripPrefix("/addfriend", addFriendServer))
 	}
 
+	var dialingServer *coordinator.Server
 	if conf.DialingMailboxes > 0 {
-		dialingServer := &coordinator.Server{
-			Service:     "Dialing",
-			PersistPath: filepath.Join(conf.PersistDir, "dialing-coordinator-state"),
+		dialingStatePath := filepath.Join(confHome, "coordinator-dialing-state")
+		dialingServer = &coordinator.Server{
+			Service:    "Dialing",
+			PrivateKey: conf.PrivateKey,
 
-			MixServers:   mixConns,
-			MixWait:      conf.MixWait,
+			MixWait:   conf.MixWait,
+			RoundWait: conf.DialingDelay,
+
 			NumMailboxes: conf.DialingMailboxes,
 
-			RoundWait: conf.DialingDelay,
+			PersistPath: dialingStatePath,
 		}
+
+		err = dialingServer.LoadPersistedState()
+		if err != nil {
+			log.Fatalf("error reading dialing state from %s: %s", dialingStatePath, err)
+		}
+		http.Handle("/dialing/", http.StripPrefix("/dialing", dialingServer))
+	}
+
+	if addFriendServer != nil {
+		err := addFriendServer.Run()
+		if err != nil {
+			log.Fatalf("error starting addfriend loop: %s", err)
+		}
+	}
+
+	if dialingServer != nil {
 		err := dialingServer.Run()
 		if err != nil {
 			log.Fatalf("error starting dialing loop: %s", err)
 		}
-		http.Handle("/dws", dialingServer)
 	}
 
-	log.Printf("listening on: %s", conf.ListenAddr)
-	err = http.ListenAndServe(conf.ListenAddr, nil)
+	listener, err := edtls.Listen("tcp", conf.ListenAddr, conf.PrivateKey)
+	if err != nil {
+		log.Fatalf("edtls listen: %s", err)
+	}
+
+	log.Printf("Listening on: %s", conf.ListenAddr)
+	err = http.Serve(listener, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func overwrite(path string) bool {
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return true
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("%s already exists.\n", path)
+	fmt.Printf("Overwrite (y/N)? ")
+	var yesno [3]byte
+	n, err := os.Stdin.Read(yesno[:])
+	if err != nil {
+		log.Fatal(err)
+	}
+	if n == 0 {
+		return false
+	}
+	if yesno[0] != 'y' && yesno[0] != 'Y' {
+		return false
+	}
+	return true
 }
