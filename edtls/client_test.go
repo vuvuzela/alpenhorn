@@ -30,10 +30,7 @@ func TestClientVerificationFailure(t *testing.T) {
 		_, _ = io.Copy(ioutil.Discard, c)
 	}()
 
-	c, err := Client(client, testKeyPub, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := Client(client, testKeyPub, nil)
 	err = c.Handshake()
 	if err != ErrVerificationFailed {
 		t.Fatalf("expected ErrVerificationFailed, got %T: %v", err, err)

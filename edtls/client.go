@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
 	"net"
 	"time"
 
@@ -19,30 +18,40 @@ var (
 )
 
 func Dial(network, addr string, theirKey ed25519.PublicKey, myKey ed25519.PrivateKey) (*tls.Conn, error) {
-	config, err := newTLSClientConfig(myKey, theirKey)
-	if err != nil {
-		return nil, err
-	}
+	config := newTLSClientConfig(myKey, theirKey)
 
 	return tls.Dial(network, addr, config)
 }
 
-func Client(rawConn net.Conn, theirKey ed25519.PublicKey, myKey ed25519.PrivateKey) (*tls.Conn, error) {
-	config, err := newTLSClientConfig(myKey, theirKey)
-	if err != nil {
-		return nil, err
-	}
+func Client(rawConn net.Conn, theirKey ed25519.PublicKey, myKey ed25519.PrivateKey) *tls.Conn {
+	config := newTLSClientConfig(myKey, theirKey)
 
 	conn := tls.Client(rawConn, config)
-	return conn, nil
+	return conn
 }
 
-func newTLSClientConfig(myKey ed25519.PrivateKey, peerKey ed25519.PublicKey) (*tls.Config, error) {
+func newTLSClientConfig(myKey ed25519.PrivateKey, peerKey ed25519.PublicKey) *tls.Config {
 	var config = &tls.Config{
 		RootCAs:            x509.NewCertPool(),
 		ClientAuth:         tls.RequestClientCert,
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: true,
+
+		GetClientCertificate: func(req *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			if myKey == nil {
+				return &tls.Certificate{}, nil
+			}
+
+			certDER, certKey, err := newSelfSignedCert(myKey)
+			if err != nil {
+				return nil, errors.New("error generating self-signed certificate: %s", err)
+			}
+			cert := &tls.Certificate{
+				Certificate: [][]byte{certDER},
+				PrivateKey:  certKey,
+			}
+			return cert, nil
+		},
 
 		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 			if len(rawCerts) == 0 {
@@ -70,20 +79,5 @@ func newTLSClientConfig(myKey ed25519.PrivateKey, peerKey ed25519.PublicKey) (*t
 		},
 	}
 
-	if myKey == nil {
-		return config, nil
-	}
-
-	certDER, certKey, err := newSelfSignedCert(myKey)
-	if err != nil {
-		return nil, fmt.Errorf("error generating self-signed certificate: %s", err)
-	}
-
-	cert := tls.Certificate{
-		Certificate: [][]byte{certDER},
-		PrivateKey:  certKey,
-	}
-	config.Certificates = []tls.Certificate{cert}
-
-	return config, nil
+	return config
 }
