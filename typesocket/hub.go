@@ -69,10 +69,13 @@ func (c *serverConn) readPump() {
 		var e envelope
 		err := c.conn.ReadJSON(&e)
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway) {
-				log.Printf("unexpected close error: %v", err)
-			} else {
-				log.Printf("readJSON error: %s", err)
+			switch {
+			case websocket.IsCloseError(err, websocket.CloseGoingAway):
+				// all good
+			case websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway):
+				log.Errorf("hub: unexpected close error: %v", err)
+			default:
+				log.Errorf("hub: ReadJSON error: %s", err)
 			}
 			break
 		}
