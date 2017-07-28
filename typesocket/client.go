@@ -7,6 +7,9 @@ import (
 
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/ed25519"
+
+	"vuvuzela.io/alpenhorn/edtls"
 )
 
 type clientConn struct {
@@ -21,8 +24,11 @@ type Conn interface {
 	Close() error
 }
 
-func Dial(addr string, mux Mux) (Conn, error) {
+func Dial(addr string, peerKey ed25519.PublicKey, mux Mux) (Conn, error) {
+	tlsConfig := edtls.NewTLSClientConfig(nil, peerKey)
+
 	dialer := &websocket.Dialer{
+		TLSClientConfig:  tlsConfig,
 		HandshakeTimeout: 25 * time.Second,
 	}
 	ws, _, err := dialer.Dial(addr, nil)
