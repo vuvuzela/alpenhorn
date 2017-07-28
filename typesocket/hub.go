@@ -108,18 +108,18 @@ func (c *serverConn) writePump() {
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			w, err := c.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
-				log.Printf("write error: %s", err)
+				log.Errorf("hub: write error: %s", err)
 				return
 			}
 			w.Write(message)
 
 			if err := w.Close(); err != nil {
-				log.Printf("write (close) error: %s", err)
+				log.Errorf("hub: write (close) error: %s", err)
 				return
 			}
 		case <-ticker.C:
 			if err := c.write(websocket.PingMessage, []byte{}); err != nil {
-				log.Printf("write (ping) error: %s", err)
+				log.Errorf("hub: write (ping) error: %s", err)
 				return
 			}
 		}
@@ -168,7 +168,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Upgrade: %s", err)
+		log.Errorf("hub: Upgrade error: %s", err)
 		return
 	}
 
