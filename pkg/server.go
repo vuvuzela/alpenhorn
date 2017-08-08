@@ -144,6 +144,8 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/extract":
 		srv.extractHandler(w, r)
+	case "/status":
+		srv.statusHandler(w, r)
 	case "/register":
 		srv.registerHandler(w, r)
 	case "/verify":

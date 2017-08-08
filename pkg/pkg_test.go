@@ -91,6 +91,11 @@ func TestSingleClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	err = client.CheckStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	pkgs := []pkg.PublicServerConfig{testpkg.PublicServerConfig}
 	pkgSettings, err := coordinatorClient.NewRound(pkgs, 42)
 	if err != nil {

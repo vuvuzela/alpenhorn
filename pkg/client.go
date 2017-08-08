@@ -79,6 +79,22 @@ func (c *Client) Verify(token []byte) error {
 	return nil
 }
 
+func (c *Client) CheckStatus() error {
+	args := &statusArgs{
+		Username:         c.Username,
+		ServerSigningKey: c.PublicServerConfig.Key,
+	}
+	rand.Read(args.Message[:])
+	args.Signature = ed25519.Sign(c.LoginKey, args.msg())
+
+	var reply statusReply
+	err := c.do("status", args, &reply)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 type ExtractResult struct {
 	PrivateKey  *ibe.IdentityPrivateKey
 	IdentitySig bls.Signature
