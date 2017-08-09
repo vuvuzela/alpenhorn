@@ -34,7 +34,7 @@ func (m *Mixchain) Close() error {
 	return nil
 }
 
-func LaunchMixchain(length int, cdnAddr string, coordinatorKey, cdnKey ed25519.PublicKey) *Mixchain {
+func LaunchMixchain(length int, coordinatorKey ed25519.PublicKey) *Mixchain {
 	publicKeys := make([]ed25519.PublicKey, length)
 	privateKeys := make([]ed25519.PrivateKey, length)
 	listeners := make([]net.Listener, length)
@@ -54,24 +54,9 @@ func LaunchMixchain(length int, cdnAddr string, coordinatorKey, cdnKey ed25519.P
 	mixServers := make([]*mixnet.Server, length)
 	rpcServers := make([]*grpc.Server, length)
 	for pos := length - 1; pos >= 0; pos-- {
-		var nextServer mixnet.PublicServerConfig
-		// if not the last server
-		if pos < length-1 {
-			nextServer = mixnet.PublicServerConfig{
-				Key:     publicKeys[pos+1],
-				Address: addrs[pos+1],
-			}
-		}
-
 		mixer := &mixnet.Server{
 			SigningKey:     privateKeys[pos],
 			CoordinatorKey: coordinatorKey,
-
-			ServerPosition: pos,
-			NumServers:     length,
-			NextServer:     nextServer,
-			CDNAddr:        cdnAddr,
-			CDNPublicKey:   cdnKey,
 
 			Services: map[string]mixnet.MixService{
 				"AddFriend": &addfriend.Mixer{

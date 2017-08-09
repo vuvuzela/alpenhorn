@@ -19,7 +19,6 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"vuvuzela.io/alpenhorn/addfriend"
-	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/dialing"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
@@ -29,15 +28,16 @@ import (
 )
 
 var (
-	globalConfPath = flag.String("global", "", "global config file")
-	confPath       = flag.String("conf", "", "config file")
-	doinit         = flag.Bool("init", false, "create config file")
+	confPath = flag.String("conf", "", "config file")
+	doinit   = flag.Bool("init", false, "create config file")
 )
 
 type Config struct {
 	ListenAddr string
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
+
+	CoordinatorKey ed25519.PublicKey
 
 	AddFriendNoise rand.Laplace
 	DialingNoise   rand.Laplace
@@ -53,6 +53,8 @@ listenAddr = {{.ListenAddr | printf "%q"}}
 
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
+
+coordinatorKey = "change me"
 
 [addFriendNoise]
 mu = {{.AddFriendNoise.Mu | printf "%0.1f"}}
@@ -114,30 +116,9 @@ func main() {
 		return
 	}
 
-	if *globalConfPath == "" {
-		fmt.Println("specify global config file with -global")
-		os.Exit(1)
-	}
-
 	if *confPath == "" {
 		fmt.Println("specify config file with -conf")
 		os.Exit(1)
-	}
-
-	globalConf, err := config.ReadGlobalConfigFile(*globalConfPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	alpConf, err := globalConf.AlpenhornConfig()
-	if err != nil {
-		log.Fatalf("error reading alpenhorn config from %q: %s", *globalConfPath, err)
-	}
-	if alpConf.CDN.Key == nil || alpConf.CDN.Address == "" {
-		log.Fatal("alpenhorn cdn is missing a key or address")
-	}
-	coordinatorKey := alpConf.Coordinator.Key
-	if coordinatorKey == nil {
-		log.Fatal("no alpenhorn coordinator key specified in global config")
 	}
 
 	data, err := ioutil.ReadFile(*confPath)
@@ -150,51 +131,13 @@ func main() {
 		log.Fatalf("error parsing config %q: %s", *confPath, err)
 	}
 
-	mixers := alpConf.Mixers
-	ourPos := -1
-	for i, mixer := range mixers {
-		if bytes.Equal(mixer.Key, conf.PublicKey) {
-			ourPos = i
-			break
-		}
-	}
-	if ourPos < 0 {
-		log.Fatal("our key was not found in the alpenhorn mixer list")
-	}
-
-	var prevServerKey ed25519.PublicKey
-	if ourPos == 0 {
-		prevServerKey = coordinatorKey
-	} else {
-		prevServerKey = mixers[ourPos-1].Key
-		if prevServerKey == nil {
-			// first mixer in the config file is called "mixer 1"
-			log.Fatalf("alpenhorn mixer %d has no key", ourPos-1+1)
-		}
-	}
-
-	var nextServer mixnet.PublicServerConfig
-	lastServer := ourPos == len(mixers)-1
-	if !lastServer {
-		next := mixers[ourPos+1]
-		if next.Key == nil || next.Address == "" {
-			log.Fatalf("alpenhorn mixer %d is missing a key or address", ourPos+1+1)
-		}
-		nextServer = mixnet.PublicServerConfig{
-			Key:     next.Key,
-			Address: next.Address,
-		}
+	if conf.CoordinatorKey == nil {
+		log.Fatal("no alpenhorn coordinator key specified in config")
 	}
 
 	mixServer := &mixnet.Server{
 		SigningKey:     conf.PrivateKey,
-		CoordinatorKey: alpConf.Coordinator.Key,
-
-		ServerPosition: ourPos,
-		NumServers:     len(mixers),
-		NextServer:     nextServer,
-		CDNAddr:        alpConf.CDN.Address,
-		CDNPublicKey:   alpConf.CDN.Key,
+		CoordinatorKey: conf.CoordinatorKey,
 
 		Services: map[string]mixnet.MixService{
 			"AddFriend": &addfriend.Mixer{

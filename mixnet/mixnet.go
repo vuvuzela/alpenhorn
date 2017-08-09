@@ -59,12 +59,6 @@ type Server struct {
 
 	Services map[string]MixService
 
-	ServerPosition int // position in chain, starting at 0
-	NumServers     int
-	NextServer     PublicServerConfig
-	CDNPublicKey   ed25519.PublicKey
-	CDNAddr        string
-
 	roundsMu sync.RWMutex
 	rounds   map[serviceRound]*roundState
 
@@ -85,6 +79,10 @@ type roundState struct {
 	url               string
 	err               error
 
+	chain           []PublicServerConfig
+	myPos           int
+	cdnAddress      string
+	cdnKey          ed25519.PublicKey
 	onionPrivateKey *[32]byte
 	onionPublicKey  *[32]byte
 	nextServerKeys  []*[32]byte
@@ -111,7 +109,7 @@ func (srv *Server) getRound(service string, round uint32) (*roundState, error) {
 	return st, nil
 }
 
-func (srv *Server) authCoordinator(ctx context.Context) error {
+func (srv *Server) auth(ctx context.Context, expectedKey ed25519.PublicKey) error {
 	p, ok := peer.FromContext(ctx)
 	if !ok {
 		return status.Errorf(codes.DataLoss, "failed to get peer from ctx")
@@ -128,7 +126,7 @@ func (srv *Server) authCoordinator(ctx context.Context) error {
 	}
 	peerKey := edtls.GetSigningKey(certs[0])
 
-	if !bytes.Equal(srv.CoordinatorKey, peerKey) {
+	if !bytes.Equal(expectedKey, peerKey) {
 		return status.Errorf(codes.Unauthenticated, "wrong edtls key")
 	}
 
@@ -137,7 +135,7 @@ func (srv *Server) authCoordinator(ctx context.Context) error {
 
 func (srv *Server) NewRound(ctx context.Context, req *pb.NewRoundRequest) (*pb.NewRoundResponse, error) {
 	log.WithFields(log.Fields{"service": req.Service, "rpc": "NewRound", "round": req.Round}).Info()
-	if err := srv.authCoordinator(ctx); err != nil {
+	if err := srv.auth(ctx, srv.CoordinatorKey); err != nil {
 		return nil, err
 	}
 
@@ -164,7 +162,32 @@ func (srv *Server) NewRound(ctx context.Context, req *pb.NewRoundRequest) (*pb.N
 		return nil, fmt.Errorf("box.GenerateKey error: %s", err)
 	}
 
+	chain := make([]PublicServerConfig, len(req.Chain))
+	myPos := -1
+	myPub := srv.SigningKey.Public().(ed25519.PublicKey)
+	for i, conf := range req.Chain {
+		if err := chain[i].FromProto(conf); err != nil {
+			return nil, err
+		}
+		if bytes.Equal(conf.Key, myPub) {
+			myPos = i
+		}
+	}
+	if myPos == -1 {
+		return nil, errors.New("my key is not in the chain")
+	}
+	if myPos == len(chain)-1 {
+		// check CDN info if the last server
+		if req.CDNAddress == "" || len(req.CDNKey) != ed25519.PublicKeySize {
+			return nil, errors.New("incomplete CDN info")
+		}
+	}
+
 	st = &roundState{
+		chain:           chain,
+		myPos:           myPos,
+		cdnAddress:      req.CDNAddress,
+		cdnKey:          req.CDNKey,
 		onionPublicKey:  public,
 		onionPrivateKey: private,
 	}
@@ -186,7 +209,7 @@ func (srv *Server) NewRound(ctx context.Context, req *pb.NewRoundRequest) (*pb.N
 // or a different number of mailboxes in a round (which can lead to
 // distinguishable noise).
 func (srv *Server) SetRoundSettings(ctx context.Context, req *pb.SetRoundSettingsRequest) (*pb.RoundSettingsSignature, error) {
-	if err := srv.authCoordinator(ctx); err != nil {
+	if err := srv.auth(ctx, srv.CoordinatorKey); err != nil {
 		return nil, err
 	}
 
@@ -213,19 +236,19 @@ func (srv *Server) SetRoundSettings(ctx context.Context, req *pb.SetRoundSetting
 		}, nil
 	}
 
-	if len(settings.OnionKeys) != srv.NumServers {
-		return nil, errors.New("bad round settings: want %d keys, got %d", srv.NumServers, len(settings.OnionKeys))
+	if len(settings.OnionKeys) != len(st.chain) {
+		return nil, errors.New("bad round settings: want %d keys, got %d", len(st.chain), len(settings.OnionKeys))
 	}
 
-	if !bytes.Equal(settings.OnionKeys[srv.ServerPosition][:], st.onionPublicKey[:]) {
-		return nil, errors.New("bad round settings: unexpected key at position %d", srv.ServerPosition)
+	if !bytes.Equal(settings.OnionKeys[st.myPos][:], st.onionPublicKey[:]) {
+		return nil, errors.New("bad round settings: unexpected key at position %d", st.myPos)
 	}
 
 	sig := ed25519.Sign(srv.SigningKey, settings.SigningMessage())
 	st.settingsSignature = sig
 
 	st.numMailboxes = settings.NumMailboxes
-	st.nextServerKeys = settings.OnionKeys[srv.ServerPosition+1:]
+	st.nextServerKeys = settings.OnionKeys[st.myPos+1:]
 	st.noiseDone = make(chan struct{})
 
 	// Now is a good time to start generating noise.
@@ -260,10 +283,22 @@ func (srv *Server) AddOnions(ctx context.Context, req *pb.AddOnionsRequest) (*pb
 	if err != nil {
 		return nil, err
 	}
+
+	// Limit this RPC to the "previous" server in the chain.
+	var expectedKey ed25519.PublicKey
+	if st.myPos == 0 {
+		expectedKey = srv.CoordinatorKey
+	} else {
+		expectedKey = st.chain[st.myPos-1].Key
+	}
+	if err := srv.auth(ctx, expectedKey); err != nil {
+		return nil, err
+	}
+
 	service := srv.Services[req.Service]
 
 	messages := make([][]byte, 0, len(req.Onions))
-	expectedOnionSize := (srv.NumServers-srv.ServerPosition)*onionbox.Overhead + service.MessageSize()
+	expectedOnionSize := (len(st.chain)-st.myPos)*onionbox.Overhead + service.MessageSize()
 
 	for _, onion := range req.Onions {
 		if len(onion) == expectedOnionSize {
@@ -313,6 +348,15 @@ func (srv *Server) CloseRound(ctx context.Context, req *pb.CloseRoundRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	var expectedKey ed25519.PublicKey
+	if st.myPos == 0 {
+		expectedKey = srv.CoordinatorKey
+	} else {
+		expectedKey = st.chain[st.myPos-1].Key
+	}
+	if err := srv.auth(ctx, expectedKey); err != nil {
+		return nil, err
+	}
 
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -339,7 +383,7 @@ func (srv *Server) CloseRound(ctx context.Context, req *pb.CloseRoundRequest) (*
 	shuffler := shuffle.New(rand.Reader, len(st.incoming))
 	shuffler.Shuffle(st.incoming)
 
-	url, err := srv.nextHop(ctx, req.Service, req.Round, st.incoming)
+	url, err := srv.nextHop(ctx, req, st)
 	st.url = url
 	st.err = err
 
@@ -350,20 +394,18 @@ func (srv *Server) CloseRound(ctx context.Context, req *pb.CloseRoundRequest) (*
 	}, err
 }
 
-func (srv *Server) lastServer() bool {
-	return srv.ServerPosition == srv.NumServers-1
-}
-
-func (srv *Server) nextHop(ctx context.Context, serviceName string, round uint32, onions [][]byte) (url string, err error) {
+func (srv *Server) nextHop(ctx context.Context, req *pb.CloseRoundRequest, st *roundState) (url string, err error) {
+	onions := st.incoming
 	logger := log.WithFields(log.Fields{
-		"service":  serviceName,
+		"service":  req.Service,
 		"rpc":      "CloseRound",
-		"round":    round,
+		"round":    req.Round,
 		"outgoing": len(onions),
 	})
 	startTime := time.Now()
 
-	if !srv.lastServer() {
+	// if not the last server
+	if st.myPos < len(st.chain)-1 {
 		srv.once.Do(func() {
 			if srv.mixClient == nil {
 				srv.mixClient = &Client{
@@ -371,14 +413,14 @@ func (srv *Server) nextHop(ctx context.Context, serviceName string, round uint32
 				}
 			}
 		})
-		url, err = srv.mixClient.RunRound(ctx, srv.NextServer, serviceName, round, onions)
+		url, err = srv.mixClient.RunRound(ctx, st.chain[st.myPos+1], req.Service, req.Round, onions)
 		if err != nil {
 			err = fmt.Errorf("RunRound: %s", err)
 			goto End
 		}
 	} else {
 		// last server
-		mailboxes := srv.Services[serviceName].SortMessages(onions)
+		mailboxes := srv.Services[req.Service].SortMessages(onions)
 
 		buf := new(bytes.Buffer)
 		err = gob.NewEncoder(buf).Encode(mailboxes)
@@ -396,12 +438,12 @@ func (srv *Server) nextHop(ctx context.Context, serviceName string, round uint32
 		client := &http.Client{
 			Transport: &http.Transport{
 				DialTLS: func(network, addr string) (net.Conn, error) {
-					return edtls.Dial(network, addr, srv.CDNPublicKey, srv.SigningKey)
+					return edtls.Dial(network, addr, st.cdnKey, srv.SigningKey)
 				},
 			},
 		}
 
-		putURL := fmt.Sprintf("https://%s/put?bucket=%s/%d", srv.CDNAddr, serviceName, round)
+		putURL := fmt.Sprintf("https://%s/put?bucket=%s/%d", st.cdnAddress, req.Service, req.Round)
 		var resp *http.Response
 		resp, err = client.Post(putURL, "application/octet-stream", buf)
 		if err != nil {
@@ -414,7 +456,7 @@ func (srv *Server) nextHop(ctx context.Context, serviceName string, round uint32
 			err = errors.New("bad CDN response: %s", resp.Status)
 			goto End
 		}
-		url = fmt.Sprintf("https://%s/get?bucket=%s/%d", srv.CDNAddr, serviceName, round)
+		url = fmt.Sprintf("https://%s/get?bucket=%s/%d", st.cdnAddress, req.Service, req.Round)
 	}
 
 End:
@@ -431,6 +473,22 @@ End:
 type PublicServerConfig struct {
 	Key     ed25519.PublicKey
 	Address string
+}
+
+func (c PublicServerConfig) Proto() *pb.PublicServerConfig {
+	return &pb.PublicServerConfig{
+		Key:     c.Key,
+		Address: c.Address,
+	}
+}
+
+func (c *PublicServerConfig) FromProto(pbc *pb.PublicServerConfig) error {
+	if len(pbc.Key) != ed25519.PublicKeySize {
+		return errors.New("invalid key in PublicServerConfig protobuf: %#v", pbc.Key)
+	}
+	c.Key = pbc.Key
+	c.Address = pbc.Address
+	return nil
 }
 
 type Client struct {
@@ -473,12 +531,19 @@ func (c *Client) getConn(server PublicServerConfig) (pb.MixnetClient, error) {
 // signatures of the round settings.
 //
 // settings.Round and settings.NumMailboxes must be set.
-func (c *Client) NewRound(ctx context.Context, servers []PublicServerConfig, settings *RoundSettings) ([][]byte, error) {
+func (c *Client) NewRound(ctx context.Context, servers []PublicServerConfig, cdnAddr string, cdnKey ed25519.PublicKey, settings *RoundSettings) ([][]byte, error) {
 	settings.OnionKeys = make([]*[32]byte, len(servers))
 
+	chain := make([]*pb.PublicServerConfig, len(servers))
+	for i, conf := range servers {
+		chain[i] = conf.Proto()
+	}
 	newRoundReq := &pb.NewRoundRequest{
-		Service: settings.Service,
-		Round:   settings.Round,
+		Service:    settings.Service,
+		Round:      settings.Round,
+		Chain:      chain,
+		CDNAddress: cdnAddr,
+		CDNKey:     cdnKey,
 	}
 
 	conns := make([]pb.MixnetClient, len(servers))

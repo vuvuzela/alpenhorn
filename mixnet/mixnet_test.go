@@ -34,7 +34,7 @@ func TestMixnet(t *testing.T) {
 
 	testCDN := mock.LaunchCDN("", coordinatorPublic)
 
-	mixchain := mock.LaunchMixchain(3, testCDN.Addr, coordinatorPublic, testCDN.PublicKey)
+	mixchain := mock.LaunchMixchain(3, coordinatorPublic)
 
 	coordinatorLoop(coordinatorPrivate, mixchain, testCDN)
 }
@@ -72,7 +72,7 @@ func coordinatorLoop(coordinatorKey ed25519.PrivateKey, mixchain *mock.Mixchain,
 			Round:        round,
 			NumMailboxes: 1,
 		}
-		sigs, err := coordinatorClient.NewRound(context.Background(), mixchain.Servers, settings)
+		sigs, err := coordinatorClient.NewRound(context.Background(), mixchain.Servers, cdn.Addr, cdn.PublicKey, settings)
 		if err != nil {
 			log.Fatalf("mixnet.NewRound: %s", err)
 		}
@@ -152,13 +152,13 @@ func TestAuth(t *testing.T) {
 	coordinatorPublic, _, _ := ed25519.GenerateKey(rand.Reader)
 	_, badPrivate, _ := ed25519.GenerateKey(rand.Reader)
 
-	mixchain := mock.LaunchMixchain(3, "no-cdn", coordinatorPublic, nil)
+	mixchain := mock.LaunchMixchain(3, coordinatorPublic)
 
 	badClient := &mixnet.Client{
 		Key: badPrivate,
 	}
 
-	_, err := badClient.NewRound(context.Background(), mixchain.Servers, &mixnet.RoundSettings{
+	_, err := badClient.NewRound(context.Background(), mixchain.Servers, "no-cdn", nil, &mixnet.RoundSettings{
 		Service:      "AddFriend",
 		Round:        42,
 		NumMailboxes: 1,

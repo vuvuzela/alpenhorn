@@ -303,7 +303,7 @@ func createAlpenhornUniverse() *universe {
 
 	u.CDN = mock.LaunchCDN(u.Dir, coordinatorPublic)
 
-	u.Mixchain = mock.LaunchMixchain(3, u.CDN.Addr, coordinatorPublic, u.CDN.PublicKey)
+	u.Mixchain = mock.LaunchMixchain(3, coordinatorPublic)
 
 	u.PKGs = make([]*mock.PKG, 3)
 	for i := range u.PKGs {

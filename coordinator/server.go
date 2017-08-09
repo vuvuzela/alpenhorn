@@ -281,7 +281,7 @@ func (srv *Server) loop() {
 			Round:        round,
 			NumMailboxes: srv.NumMailboxes,
 		}
-		mixSigs, err := srv.mixnetClient.NewRound(context.Background(), config.MixServers, &mixSettings)
+		mixSigs, err := srv.mixnetClient.NewRound(context.Background(), config.MixServers, config.CDNServer.Address, config.CDNServer.Key, &mixSettings)
 		if err != nil {
 			logger.WithFields(log.Fields{"call": "mixnet.NewRound"}).Error(err)
 			if !srv.sleep(10 * time.Second) {

@@ -17,6 +17,18 @@ message Nothing {}
 message NewRoundRequest {
 	string service = 1;
 	uint32 round = 2;
+	repeated PublicServerConfig chain = 3;
+
+	// It's tempting to put these in the Close request,
+	// but the coordinator doesn't communicate with the
+	// last server on Close.
+	string cdn_address = 4 [(gogoproto.customname) = "CDNAddress"];
+	bytes cdn_key = 5 [(gogoproto.customname) = "CDNKey"];
+}
+
+message PublicServerConfig {
+	bytes key = 1;
+	string address = 2;
 }
 
 message NewRoundResponse {
