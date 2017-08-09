@@ -10,7 +10,6 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"fmt"
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -25,6 +24,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
+	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/errors"
 	pb "vuvuzela.io/alpenhorn/mixnet/mixnetpb"
@@ -64,6 +64,7 @@ type Server struct {
 
 	once      sync.Once
 	mixClient *Client
+	cdnClient *edhttp.Client
 }
 
 type serviceRound struct {
@@ -404,15 +405,20 @@ func (srv *Server) nextHop(ctx context.Context, req *pb.CloseRoundRequest, st *r
 	})
 	startTime := time.Now()
 
+	srv.once.Do(func() {
+		// The server's position in the chain can change, so init both
+		// the mix client and the CDN client now. This is simpler than
+		// using two sync.Once values.
+		srv.mixClient = &Client{
+			Key: srv.SigningKey,
+		}
+		srv.cdnClient = &edhttp.Client{
+			Key: srv.SigningKey,
+		}
+	})
+
 	// if not the last server
 	if st.myPos < len(st.chain)-1 {
-		srv.once.Do(func() {
-			if srv.mixClient == nil {
-				srv.mixClient = &Client{
-					Key: srv.SigningKey,
-				}
-			}
-		})
 		url, err = srv.mixClient.RunRound(ctx, st.chain[st.myPos+1], req.Service, req.Round, onions)
 		if err != nil {
 			err = fmt.Errorf("RunRound: %s", err)
@@ -435,17 +441,9 @@ func (srv *Server) nextHop(ctx context.Context, req *pb.CloseRoundRequest, st *r
 			"mailboxes":   len(mailboxes),
 		})
 
-		client := &http.Client{
-			Transport: &http.Transport{
-				DialTLS: func(network, addr string) (net.Conn, error) {
-					return edtls.Dial(network, addr, st.cdnKey, srv.SigningKey)
-				},
-			},
-		}
-
 		putURL := fmt.Sprintf("https://%s/put?bucket=%s/%d", st.cdnAddress, req.Service, req.Round)
 		var resp *http.Response
-		resp, err = client.Post(putURL, "application/octet-stream", buf)
+		resp, err = srv.cdnClient.Post(st.cdnKey, putURL, "application/octet-stream", buf)
 		if err != nil {
 			err = errors.Wrap(err, "http.Post CDN")
 			goto End
