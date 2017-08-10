@@ -7,8 +7,8 @@ package mixnet
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 
+	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/mixnet/mixnetpb"
 )
 
@@ -47,7 +47,7 @@ func (s *RoundSettings) FromProto(pb *mixnetpb.RoundSettings) error {
 		key := new([32]byte)
 		n := copy(key[:], pb.OnionKeys[i])
 		if n != 32 {
-			return fmt.Errorf("wrong size for key %d: got %d, want %d", i, n, 32)
+			return errors.New("wrong size for key %d: got %d, want %d", i, n, 32)
 		}
 		s.OnionKeys[i] = key
 	}

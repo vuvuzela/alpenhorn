@@ -105,7 +105,7 @@ func (srv *Server) getRound(service string, round uint32) (*roundState, error) {
 	}
 	srv.roundsMu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("round %d not found", round)
+		return nil, errors.New("round %d not found", round)
 	}
 	return st, nil
 }
@@ -160,7 +160,7 @@ func (srv *Server) NewRound(ctx context.Context, req *pb.NewRoundRequest) (*pb.N
 
 	public, private, err := box.GenerateKey(cryptoRand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("box.GenerateKey error: %s", err)
+		return nil, errors.New("box.GenerateKey error: %s", err)
 	}
 
 	chain := make([]PublicServerConfig, len(req.Chain))
@@ -319,7 +319,7 @@ func (srv *Server) AddOnions(ctx context.Context, req *pb.AddOnionsRequest) (*pb
 	if !st.closed {
 		st.incoming = append(st.incoming, messages...)
 	} else {
-		err = fmt.Errorf("round %d closed", req.Round)
+		err = errors.New("round %d closed", req.Round)
 	}
 	st.mu.Unlock()
 
@@ -421,7 +421,7 @@ func (srv *Server) nextHop(ctx context.Context, req *pb.CloseRoundRequest, st *r
 	if st.myPos < len(st.chain)-1 {
 		url, err = srv.mixClient.RunRound(ctx, st.chain[st.myPos+1], req.Service, req.Round, onions)
 		if err != nil {
-			err = fmt.Errorf("RunRound: %s", err)
+			err = errors.New("RunRound: %s", err)
 			goto End
 		}
 	} else {
