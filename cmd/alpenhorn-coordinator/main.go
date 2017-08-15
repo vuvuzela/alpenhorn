@@ -17,12 +17,13 @@ import (
 	"text/template"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/coordinator"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
+	"vuvuzela.io/alpenhorn/internal/alplog"
+	"vuvuzela.io/alpenhorn/log"
 )
 
 var (
@@ -194,7 +195,7 @@ func writeNewConfig(path string) {
 }
 
 func init() {
-	//log.SetFormatter(&log.JSONFormatter{})
+	log.LogDates(log.Stderr)
 }
 
 func main() {
@@ -228,6 +229,10 @@ func main() {
 		addFriendServer = &coordinator.Server{
 			Service:    "AddFriend",
 			PrivateKey: conf.PrivateKey,
+			Log: (&log.Logger{
+				Level:        log.InfoLevel,
+				EntryHandler: alplog.OutputText(log.Stderr),
+			}).WithFields(log.Fields{"service": "AddFriend"}),
 
 			PKGWait:   conf.PKGWait,
 			MixWait:   conf.MixWait,
@@ -251,6 +256,10 @@ func main() {
 		dialingServer = &coordinator.Server{
 			Service:    "Dialing",
 			PrivateKey: conf.PrivateKey,
+			Log: (&log.Logger{
+				Level:        log.InfoLevel,
+				EntryHandler: alplog.OutputText(log.Stderr),
+			}).WithFields(log.Fields{"service": "Dialing"}),
 
 			MixWait:   conf.MixWait,
 			RoundWait: conf.DialingDelay,
@@ -286,7 +295,7 @@ func main() {
 		log.Fatalf("edtls listen: %s", err)
 	}
 
-	log.Printf("Listening on: %s", conf.ListenAddr)
+	log.Infof("Listening on: %s", conf.ListenAddr)
 	err = http.Serve(listener, nil)
 	if err != nil {
 		log.Fatal(err)

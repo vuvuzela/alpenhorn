@@ -13,12 +13,12 @@ import (
 	"time"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/net/context"
 
 	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/errors"
+	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/mixnet"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/alpenhorn/typesocket"
@@ -31,6 +31,7 @@ import (
 type Server struct {
 	Service    string // "AddFriend" or "Dialing"
 	PrivateKey ed25519.PrivateKey
+	Log        *log.Logger
 
 	PKGWait      time.Duration
 	MixWait      time.Duration
@@ -222,10 +223,11 @@ func (srv *Server) loop() {
 		srv.mu.Lock()
 		srv.round++
 		round := srv.round
-		logger := log.WithFields(log.Fields{"service": srv.Service, "round": round})
 
 		configHash := srv.currentConfigHash
 		config := srv.allConfigs[configHash]
+
+		logger := srv.Log.WithFields(log.Fields{"round": round, "config": configHash})
 
 		if err := srv.persistLocked(); err != nil {
 			logger.Errorf("error persisting state: %s", err)
@@ -234,7 +236,7 @@ func (srv *Server) loop() {
 		}
 		srv.mu.Unlock()
 
-		logger.Info("starting new round")
+		logger.Info("Starting new round")
 
 		srv.hub.Broadcast("newround", NewRound{
 			Round:      round,
@@ -245,10 +247,10 @@ func (srv *Server) loop() {
 		// should take a Context for better cancelation.
 
 		if srv.Service == "AddFriend" {
-			logger.Info("requesting PKG keys")
+			logger.WithFields(log.Fields{"numPKG": len(config.PKGServers)}).Info("Requesting PKG keys")
 			pkgSettings, err := srv.pkgClient.NewRound(config.PKGServers, round)
 			if err != nil {
-				logger.WithFields(log.Fields{"call": "pkg.NewRound"}).Error(err)
+				logger.WithFields(log.Fields{"call": "pkg.NewRound"}).Errorf("pkg.NewRound failed: %s", err)
 				if !srv.sleep(10 * time.Second) {
 					break
 				}
@@ -272,7 +274,7 @@ func (srv *Server) loop() {
 
 		err := srv.prepCDN(config, round)
 		if err != nil {
-			log.Errorf("error preparing CDN for round: %s", err)
+			logger.Errorf("error preparing CDN for round: %s", err)
 			break
 		}
 
@@ -283,7 +285,7 @@ func (srv *Server) loop() {
 		}
 		mixSigs, err := srv.mixnetClient.NewRound(context.Background(), config.MixServers, config.CDNServer.Address, config.CDNServer.Key, &mixSettings)
 		if err != nil {
-			logger.WithFields(log.Fields{"call": "mixnet.NewRound"}).Error(err)
+			logger.WithFields(log.Fields{"call": "mixnet.NewRound"}).Errorf("mixnet.NewRound failed: %s", err)
 			if !srv.sleep(10 * time.Second) {
 				break
 			}
@@ -300,26 +302,24 @@ func (srv *Server) loop() {
 		srv.latestMixRound = mixRound
 		srv.mu.Unlock()
 
-		logger.Info("announcing mixnet settings")
+		logger.WithFields(log.Fields{"wait": srv.MixWait}).Info("Announcing mixnet settings")
 		srv.hub.Broadcast("mix", mixRound)
 
 		if !srv.sleep(srv.MixWait) {
 			break
 		}
 
-		logger.Info("running round")
 		srv.mu.Lock()
 		go srv.runRound(context.Background(), config.MixServers[0], round, srv.onions)
 		srv.onions = make([][]byte, 0, len(srv.onions))
 		srv.mu.Unlock()
 
-		logger.Info("waiting for next round")
 		if !srv.sleep(srv.RoundWait) {
 			break
 		}
 	}
 
-	log.WithFields(log.Fields{"service": srv.Service}).Info("shutting down")
+	srv.Log.Error("Shutting down")
 }
 
 func (srv *Server) sleep(d time.Duration) bool {
@@ -334,18 +334,28 @@ func (srv *Server) sleep(d time.Duration) bool {
 }
 
 func (srv *Server) runRound(ctx context.Context, firstServer mixnet.PublicServerConfig, round uint32, onions [][]byte) {
-	logger := log.WithFields(log.Fields{"service": srv.Service, "round": round})
-
-	logger.WithFields(log.Fields{"onions": len(onions)}).Info("start RunRound")
+	srv.Log.WithFields(log.Fields{
+		"round":  round,
+		"onions": len(onions),
+	}).Info("Start mixing")
 	start := time.Now()
+
 	url, err := srv.mixnetClient.RunRound(ctx, firstServer, srv.Service, round, onions)
 	if err != nil {
-		logger.WithFields(log.Fields{"call": "RunRound"}).Error(err)
+		srv.Log.WithFields(log.Fields{
+			"round": round,
+			"call":  "mixnet.RunRound",
+		}).Error(err)
 		srv.hub.Broadcast("error", RoundError{Round: round, Err: "server error"})
 		return
 	}
+
 	end := time.Now()
-	logger.WithFields(log.Fields{"duration": end.Sub(start)}).Info("end RunRound")
+	srv.Log.WithFields(log.Fields{
+		"round":    round,
+		"onions":   len(onions),
+		"duration": end.Sub(start),
+	}).Info("End mixing")
 
 	srv.hub.Broadcast("mailbox", MailboxURL{
 		Round:        round,
