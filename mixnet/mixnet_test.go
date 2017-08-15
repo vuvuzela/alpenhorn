@@ -10,7 +10,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"testing"
@@ -24,6 +23,7 @@ import (
 	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/internal/mock"
+	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/mixnet"
 	"vuvuzela.io/concurrency"
 	"vuvuzela.io/crypto/onionbox"
@@ -101,7 +101,7 @@ func coordinatorLoop(coordinatorKey ed25519.PrivateKey, mixchain *mock.Mixchain,
 		if msgIndex == -1 {
 			log.Fatalf("did not find our message at %s", url)
 		}
-		log.Printf("found our message at position %d", msgIndex)
+		log.Warnf("Found our message at position: %d", msgIndex)
 	}
 }
 

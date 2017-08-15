@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/net/context"
@@ -27,6 +26,7 @@ import (
 	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/errors"
+	"vuvuzela.io/alpenhorn/log"
 	pb "vuvuzela.io/alpenhorn/mixnet/mixnetpb"
 	"vuvuzela.io/concurrency"
 	"vuvuzela.io/crypto/onionbox"
@@ -58,6 +58,8 @@ type Server struct {
 	CoordinatorKey ed25519.PublicKey
 
 	Services map[string]MixService
+
+	Log *log.Logger
 
 	roundsMu sync.RWMutex
 	rounds   map[serviceRound]*roundState
@@ -135,7 +137,6 @@ func (srv *Server) auth(ctx context.Context, expectedKey ed25519.PublicKey) erro
 }
 
 func (srv *Server) NewRound(ctx context.Context, req *pb.NewRoundRequest) (*pb.NewRoundResponse, error) {
-	log.WithFields(log.Fields{"service": req.Service, "rpc": "NewRound", "round": req.Round}).Info()
 	if err := srv.auth(ctx, srv.CoordinatorKey); err != nil {
 		return nil, err
 	}
@@ -197,6 +198,14 @@ func (srv *Server) NewRound(ctx context.Context, req *pb.NewRoundRequest) (*pb.N
 	srv.rounds[serviceRound{req.Service, req.Round}] = st
 	srv.roundsMu.Unlock()
 
+	srv.Log.WithFields(log.Fields{
+		"service": req.Service,
+		"round":   req.Round,
+		"rpc":     "NewRound",
+		"mixers":  len(chain),
+		"pos":     myPos,
+	}).Info("Created new round")
+
 	return &pb.NewRoundResponse{
 		OnionKey: public[:],
 	}, nil
@@ -219,8 +228,6 @@ func (srv *Server) SetRoundSettings(ctx context.Context, req *pb.SetRoundSetting
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid round settings: %s", err)
 	}
-
-	log.WithFields(log.Fields{"service": settings.Service, "rpc": "SetRoundSettings", "round": settings.Round}).Info()
 
 	st, err := srv.getRound(settings.Service, settings.Round)
 	if err != nil {
@@ -247,6 +254,12 @@ func (srv *Server) SetRoundSettings(ctx context.Context, req *pb.SetRoundSetting
 
 	sig := ed25519.Sign(srv.SigningKey, settings.SigningMessage())
 	st.settingsSignature = sig
+
+	srv.Log.WithFields(log.Fields{
+		"service": settings.Service,
+		"round":   settings.Round,
+		"rpc":     "SetRoundSettings",
+	}).Info("Accepted round settings")
 
 	st.numMailboxes = settings.NumMailboxes
 	st.nextServerKeys = settings.OnionKeys[st.myPos+1:]
@@ -278,8 +291,6 @@ func (srv *Server) SetRoundSettings(ctx context.Context, req *pb.SetRoundSetting
 var zeroNonce = new([24]byte)
 
 func (srv *Server) AddOnions(ctx context.Context, req *pb.AddOnionsRequest) (*pb.Nothing, error) {
-	log.WithFields(log.Fields{"service": req.Service, "rpc": "AddOnions", "round": req.Round, "onions": len(req.Onions)}).Debug()
-
 	st, err := srv.getRound(req.Service, req.Round)
 	if err != nil {
 		return nil, err
@@ -296,6 +307,13 @@ func (srv *Server) AddOnions(ctx context.Context, req *pb.AddOnionsRequest) (*pb
 		return nil, err
 	}
 
+	srv.Log.WithFields(log.Fields{
+		"service": req.Service,
+		"round":   req.Round,
+		"rpc":     "AddOnions",
+		"onions":  len(req.Onions),
+	}).Debug("Decrypting onions")
+
 	service := srv.Services[req.Service]
 
 	messages := make([][]byte, 0, len(req.Onions))
@@ -310,7 +328,11 @@ func (srv *Server) AddOnions(ctx context.Context, req *pb.AddOnionsRequest) (*pb
 			if ok {
 				messages = append(messages, message)
 			} else {
-				log.WithFields(log.Fields{"service": req.Service, "rpc": "Add", "round": req.Round}).Error("Decrypting onion failed")
+				srv.Log.WithFields(log.Fields{
+					"service": req.Service,
+					"round":   req.Round,
+					"rpc":     "Add",
+				}).Warn("Decrypting onion failed")
 			}
 		}
 	}
@@ -343,8 +365,6 @@ func (srv *Server) filterIncoming(st *roundState) {
 }
 
 func (srv *Server) CloseRound(ctx context.Context, req *pb.CloseRoundRequest) (*pb.CloseRoundResponse, error) {
-	log.WithFields(log.Fields{"service": req.Service, "rpc": "CloseRound", "round": req.Round}).Info()
-
 	st, err := srv.getRound(req.Service, req.Round)
 	if err != nil {
 		return nil, err
@@ -369,14 +389,17 @@ func (srv *Server) CloseRound(ctx context.Context, req *pb.CloseRoundRequest) (*
 	}
 	st.closed = true
 
-	log.WithFields(log.Fields{
-		"service": req.Service,
-		"rpc":     "CloseRound",
-		"round":   req.Round,
-		"onions":  len(st.incoming),
-	}).Info()
-
+	numIncoming := len(st.incoming)
 	srv.filterIncoming(st)
+	numFiltered := numIncoming - len(st.incoming)
+
+	srv.Log.WithFields(log.Fields{
+		"service":  req.Service,
+		"round":    req.Round,
+		"rpc":      "CloseRound",
+		"incoming": numIncoming,
+		"filtered": numFiltered,
+	}).Info("Filtered onions")
 
 	<-st.noiseDone
 	st.incoming = append(st.incoming, st.noise...)
@@ -396,15 +419,6 @@ func (srv *Server) CloseRound(ctx context.Context, req *pb.CloseRoundRequest) (*
 }
 
 func (srv *Server) nextHop(ctx context.Context, req *pb.CloseRoundRequest, st *roundState) (url string, err error) {
-	onions := st.incoming
-	logger := log.WithFields(log.Fields{
-		"service":  req.Service,
-		"rpc":      "CloseRound",
-		"round":    req.Round,
-		"outgoing": len(onions),
-	})
-	startTime := time.Now()
-
 	srv.once.Do(func() {
 		// The server's position in the chain can change, so init both
 		// the mix client and the CDN client now. This is simpler than
@@ -417,6 +431,15 @@ func (srv *Server) nextHop(ctx context.Context, req *pb.CloseRoundRequest, st *r
 		}
 	})
 
+	onions := st.incoming
+	logger := srv.Log.WithFields(log.Fields{
+		"service":  req.Service,
+		"round":    req.Round,
+		"rpc":      "CloseRound",
+		"outgoing": len(onions),
+	})
+
+	startTime := time.Now()
 	// if not the last server
 	if st.myPos < len(st.chain)-1 {
 		url, err = srv.mixClient.RunRound(ctx, st.chain[st.myPos+1], req.Service, req.Round, onions)
@@ -455,15 +478,18 @@ func (srv *Server) nextHop(ctx context.Context, req *pb.CloseRoundRequest, st *r
 			goto End
 		}
 		url = fmt.Sprintf("https://%s/get?bucket=%s/%d", st.cdnAddress, req.Service, req.Round)
+		logger = logger.WithFields(log.Fields{
+			"url": url,
+		})
 	}
 
 End:
 	endTime := time.Now()
-	logger = logger.WithField("duration", endTime.Sub(startTime))
+	logger = logger.WithFields(log.Fields{"duration": endTime.Sub(startTime)})
 	if err == nil {
-		logger.Info(url)
+		logger.Info("Next hop success")
 	} else {
-		logger.Error(err)
+		logger.Errorf("Next hop failed: %s", err)
 	}
 	return
 }

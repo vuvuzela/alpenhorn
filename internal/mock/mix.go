@@ -5,7 +5,7 @@
 package mock
 
 import (
-	"log"
+	"fmt"
 	"net"
 
 	"golang.org/x/crypto/ed25519"
@@ -15,6 +15,8 @@ import (
 	"vuvuzela.io/alpenhorn/addfriend"
 	"vuvuzela.io/alpenhorn/dialing"
 	"vuvuzela.io/alpenhorn/edtls"
+	"vuvuzela.io/alpenhorn/internal/alplog"
+	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/mixnet"
 	"vuvuzela.io/alpenhorn/mixnet/mixnetpb"
 	"vuvuzela.io/crypto/rand"
@@ -32,6 +34,11 @@ func (m *Mixchain) Close() error {
 		srv.Stop()
 	}
 	return nil
+}
+
+var logger = &log.Logger{
+	Level:        log.InfoLevel,
+	EntryHandler: alplog.OutputText(log.Stderr),
 }
 
 func LaunchMixchain(length int, coordinatorKey ed25519.PublicKey) *Mixchain {
@@ -57,6 +64,9 @@ func LaunchMixchain(length int, coordinatorKey ed25519.PublicKey) *Mixchain {
 		mixer := &mixnet.Server{
 			SigningKey:     privateKeys[pos],
 			CoordinatorKey: coordinatorKey,
+			Log: logger.WithFields(log.Fields{
+				"tag": fmt.Sprintf("mixer-%d", pos),
+			}),
 
 			Services: map[string]mixnet.MixService{
 				"AddFriend": &addfriend.Mixer{

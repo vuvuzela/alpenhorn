@@ -13,7 +13,6 @@ import (
 	"os"
 	"text/template"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -22,6 +21,8 @@ import (
 	"vuvuzela.io/alpenhorn/dialing"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
+	"vuvuzela.io/alpenhorn/internal/alplog"
+	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/mixnet"
 	pb "vuvuzela.io/alpenhorn/mixnet/mixnetpb"
 	"vuvuzela.io/crypto/rand"
@@ -105,7 +106,7 @@ func writeNewConfig() {
 }
 
 func init() {
-	//log.SetFormatter(&log.JSONFormatter{})
+	log.LogDates(log.Stderr)
 }
 
 func main() {
@@ -138,6 +139,10 @@ func main() {
 	mixServer := &mixnet.Server{
 		SigningKey:     conf.PrivateKey,
 		CoordinatorKey: conf.CoordinatorKey,
+		Log: &log.Logger{
+			Level:        log.InfoLevel,
+			EntryHandler: alplog.OutputText(log.Stderr),
+		},
 
 		Services: map[string]mixnet.MixService{
 			"AddFriend": &addfriend.Mixer{
@@ -155,7 +160,7 @@ func main() {
 
 	pb.RegisterMixnetServer(grpcServer, mixServer)
 
-	log.Printf("Listening on %q", conf.ListenAddr)
+	log.Infof("Listening on %q", conf.ListenAddr)
 	listener, err := net.Listen("tcp", conf.ListenAddr)
 	if err != nil {
 		log.Fatalf("net.Listen: %s", err)
