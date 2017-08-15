@@ -15,15 +15,16 @@ import (
 	"testing"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/cdn"
 	"vuvuzela.io/alpenhorn/coordinator"
 	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/edtls"
+	"vuvuzela.io/alpenhorn/internal/alplog"
 	"vuvuzela.io/alpenhorn/internal/debug"
 	"vuvuzela.io/alpenhorn/internal/mock"
+	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/crypto/rand"
 )
@@ -134,7 +135,7 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-alice.Handler.(*chanHandler).sentFriendRequest
-	log.Printf("Alice: sent friend request")
+	log.Infof("Alice: sent friend request")
 
 	friendRequest := <-bob.Handler.(*chanHandler).receivedFriendRequest
 	currentConfig := u.addFriendServer.CurrentConfig()
@@ -147,19 +148,19 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-bob.Handler.(*chanHandler).sentFriendRequest
-	log.Printf("Bob: approved friend request")
+	log.Infof("Bob: approved friend request")
 
 	aliceConfirmedFriend := <-alice.Handler.(*chanHandler).confirmedFriend
 	if aliceConfirmedFriend.Username != bob.Username {
 		t.Fatalf("made friends with unexpected username: %s", aliceConfirmedFriend.Username)
 	}
-	log.Printf("Alice: confirmed friend")
+	log.Infof("Alice: confirmed friend")
 
 	bobConfirmedFriend := <-bob.Handler.(*chanHandler).confirmedFriend
 	if bobConfirmedFriend.Username != alice.Username {
 		t.Fatalf("made friends with unexpected username: %s", bobConfirmedFriend.Username)
 	}
-	log.Printf("Bob: confirmed friend")
+	log.Infof("Bob: confirmed friend")
 
 	friend := alice.GetFriend(bob.Username)
 	if friend == nil {
@@ -168,13 +169,13 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 
 	friend.Call(0)
 	outCall := <-alice.Handler.(*chanHandler).sentCall
-	log.Printf("Alice: called Bob")
+	log.Infof("Alice: called Bob")
 
 	inCall := <-bob.Handler.(*chanHandler).receivedCall
 	if inCall.Username != alice.Username {
 		t.Fatalf("received call from unexpected username: %s", inCall.Username)
 	}
-	log.Printf("Bob: received call from Alice")
+	log.Infof("Bob: received call from Alice")
 
 	if !bytes.Equal(outCall.SessionKey()[:], inCall.SessionKey[:]) {
 		t.Fatal("Alice and Bob agreed on different keys!")
@@ -205,7 +206,7 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	if inCall.Username != bob2.Username {
 		t.Fatalf("received call from unexpected username: %s", inCall.Username)
 	}
-	log.Printf("Alice: received call from Bob")
+	log.Infof("Alice: received call from Bob")
 
 	// Test adding a new PKG.
 	newAddFriendConfig := *u.addFriendServer.CurrentConfig()
@@ -215,7 +216,7 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	log.Printf("Created new PKG server: %s", newPKG.Address)
+	log.Infof("Created new PKG server: %s", newPKG.Address)
 	newAddFriendConfig.PKGServers = append(newAddFriendConfig.PKGServers, newPKG.PublicServerConfig)
 	newConfigURL := fmt.Sprintf("https://%s/addfriend/newconfig", u.CoordinatorAddress)
 	resp, err := (&edhttp.Client{}).PostJSON(u.CoordinatorKey, newConfigURL, newAddFriendConfig)
@@ -226,7 +227,7 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 		msg, _ := ioutil.ReadAll(resp.Body)
 		t.Fatalf("bad http status code %s: %s: %q", newConfigURL, resp.Status, msg)
 	}
-	log.Printf("Uploaded new addfriend config")
+	log.Infof("Uploaded new addfriend config")
 
 	time.Sleep(2 * time.Second)
 
@@ -241,7 +242,7 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	if !reflect.DeepEqual(friendRequest.Verifiers, newAddFriendConfig.PKGServers) {
 		t.Fatalf("unexpected verifiers:\ngot:  %#v\nwant: %#v", friendRequest.Verifiers, newAddFriendConfig.PKGServers)
 	}
-	log.Printf("Alice: received friend request from Bob")
+	log.Infof("Alice: received friend request from Bob")
 
 	_, err = friendRequest.Approve()
 	if err != nil {
@@ -256,13 +257,18 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	if outCall.Intent != 1 {
 		t.Fatalf("wrong intent: got %d, want %d", outCall.Intent, 1)
 	}
-	log.Printf("Bob: confirmed friend; calling with intent 1")
+	log.Infof("Bob: confirmed friend; calling with intent 1")
 
 	inCall = <-alice.Handler.(*chanHandler).receivedCall
 	if inCall.Intent != 1 {
 		t.Fatalf("wrong intent: got %d, want %d", inCall.Intent, 1)
 	}
-	log.Printf("Alice: received call with intent 1")
+	log.Infof("Alice: received call with intent 1")
+}
+
+var logger = &log.Logger{
+	Level:        log.InfoLevel,
+	EntryHandler: alplog.OutputText(log.Stderr),
 }
 
 type universe struct {
@@ -333,6 +339,10 @@ func createAlpenhornUniverse() *universe {
 	u.addFriendServer = &coordinator.Server{
 		Service:    "AddFriend",
 		PrivateKey: coordinatorPrivate,
+		Log: logger.WithFields(log.Fields{
+			"tag":     "coordinator",
+			"service": "AddFriend",
+		}),
 
 		PKGWait:      1 * time.Second,
 		MixWait:      1 * time.Second,
@@ -354,6 +364,10 @@ func createAlpenhornUniverse() *universe {
 	u.dialingServer = &coordinator.Server{
 		Service:    "Dialing",
 		PrivateKey: coordinatorPrivate,
+		Log: logger.WithFields(log.Fields{
+			"tag":     "coordinator",
+			"service": "Dialing",
+		}),
 
 		MixWait:      1 * time.Second,
 		RoundWait:    2 * time.Second,
