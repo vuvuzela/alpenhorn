@@ -97,6 +97,7 @@ func (f *Friend) UnsafeKeywheelState() (uint32, *[32]byte) {
 const (
 	IntentTalk = iota
 	IntentPing
+	IntentCallMeBack
 	intentsMax
 )
 
