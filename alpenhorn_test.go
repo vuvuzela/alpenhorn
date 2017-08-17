@@ -264,6 +264,83 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 		t.Fatalf("wrong intent: got %d, want %d", inCall.Intent, 1)
 	}
 	log.Infof("Alice: received call with intent 1")
+
+	// Add more servers to the end of the addfriend mixchain.
+	newChain := mock.LaunchMixchain(2, u.CoordinatorKey)
+
+	newAddFriendConfig = *u.addFriendServer.CurrentConfig()
+	newAddFriendConfig.PrevConfigHash = newAddFriendConfig.Hash()
+	newAddFriendConfig.Created = time.Now()
+	newAddFriendConfig.MixServers = append(newAddFriendConfig.MixServers, newChain.Servers...)
+
+	resp, err = (&edhttp.Client{}).PostJSON(u.CoordinatorKey, newConfigURL, newAddFriendConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := ioutil.ReadAll(resp.Body)
+		t.Fatalf("bad http status code %s: %s: %q", newConfigURL, resp.Status, msg)
+	}
+	log.Infof("Uploaded new addfriend config")
+
+	time.Sleep(2 * time.Second)
+
+	_, err = bob2.SendFriendRequest(alice.Username, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-bob2.Handler.(*chanHandler).sentFriendRequest
+	log.Infof("Bob: sent friend request to Alice")
+
+	friendRequest = <-alice.Handler.(*chanHandler).receivedFriendRequest
+	log.Infof("Alice: got friend request from %s", friendRequest.Username)
+
+	_, err = friendRequest.Approve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-alice.Handler.(*chanHandler).sentFriendRequest
+	<-alice.Handler.(*chanHandler).confirmedFriend
+
+	friend = <-bob2.Handler.(*chanHandler).confirmedFriend
+	log.Infof("Bob: confirmed friend")
+
+	// Add more servers to the dialing mixchain.
+	newDialingConfig := *u.dialingServer.CurrentConfig()
+	newDialingConfig.PrevConfigHash = newDialingConfig.Hash()
+	newDialingConfig.Created = time.Now()
+	newDialingConfig.MixServers = append(newDialingConfig.MixServers, newChain.Servers...)
+
+	newConfigURL = fmt.Sprintf("https://%s/dialing/newconfig", u.CoordinatorAddress)
+	resp, err = (&edhttp.Client{}).PostJSON(u.CoordinatorKey, newConfigURL, newDialingConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := ioutil.ReadAll(resp.Body)
+		t.Fatalf("bad http status code %s: %s: %q", newConfigURL, resp.Status, msg)
+	}
+	log.Infof("Uploaded new dialing config")
+
+	time.Sleep(2 * time.Second)
+
+	friend = alice.GetFriend(bob2.Username)
+	friend.Call(2)
+	outCall = <-alice.Handler.(*chanHandler).sentCall
+	if outCall.Intent != 2 {
+		t.Fatalf("wrong intent: got %d, want %d", outCall.Intent, 2)
+	}
+	log.Infof("Alice: calling Bob with intent 2")
+
+	inCall = <-bob2.Handler.(*chanHandler).receivedCall
+	if inCall.Intent != 2 {
+		t.Fatalf("wrong intent: got %d, want %d", inCall.Intent, 2)
+	}
+	log.Infof("Bob: received call with intent 2")
+
+	if !bytes.Equal(outCall.SessionKey()[:], inCall.SessionKey[:]) {
+		t.Fatal("Alice and Bob agreed on different keys!")
+	}
 }
 
 var logger = &log.Logger{
