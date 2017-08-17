@@ -170,7 +170,7 @@ func (c *Client) scanBloomFilter(conn typesocket.Conn, v coordinator.MailboxURL)
 		c.Handler.Error(errors.Wrap(err, "decoding bloom filter"))
 	}
 
-	allTokens := c.wheel.IncomingDialTokens(c.Username, v.Round, intentsMax)
+	allTokens := c.wheel.IncomingDialTokens(c.Username, v.Round, IntentMax)
 	for _, user := range allTokens {
 		for intent, token := range user.Tokens {
 			if filter.Test(token[:]) {

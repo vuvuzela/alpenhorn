@@ -5,6 +5,7 @@
 package alpenhorn
 
 import (
+	"fmt"
 	"time"
 
 	"golang.org/x/crypto/ed25519"
@@ -98,7 +99,7 @@ const (
 	IntentTalk = iota
 	IntentPing
 	IntentCallMeBack
-	intentsMax
+	IntentMax
 )
 
 // Call is used to call a friend using Alpenhorn's dialing protocol.
@@ -107,6 +108,9 @@ const (
 // call object. Call does nothing and returns nil if the friend is
 // not in the client's address book.
 func (f *Friend) Call(intent int) *OutgoingCall {
+	if intent >= IntentMax {
+		panic(fmt.Sprintf("invalid intent: %d", intent))
+	}
 	if !f.client.wheel.Exists(f.Username) {
 		return nil
 	}
