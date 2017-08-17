@@ -14,12 +14,13 @@ import (
 	"text/template"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/cdn"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
+	"vuvuzela.io/alpenhorn/internal/alplog"
+	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/crypto/rand"
 )
 
@@ -77,6 +78,11 @@ func writeNewConfig() {
 		log.Fatal(err)
 	}
 	fmt.Printf("wrote %s\n", path)
+}
+
+func init() {
+	log.LogDates(log.Stderr)
+	log.StdLogger.EntryHandler = alplog.OutputText(log.Stderr)
 }
 
 func main() {

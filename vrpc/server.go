@@ -11,10 +11,10 @@ import (
 	"net/rpc"
 	"sync"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/edtls"
+	"vuvuzela.io/alpenhorn/log"
 )
 
 type Server struct {

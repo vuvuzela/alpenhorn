@@ -15,13 +15,14 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
 	"vuvuzela.io/alpenhorn/errors"
+	"vuvuzela.io/alpenhorn/internal/alplog"
+	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/crypto/rand"
 )
@@ -82,6 +83,11 @@ func writeNewConfig() {
 		log.Fatal(err)
 	}
 	fmt.Printf("wrote %s\n", path)
+}
+
+func init() {
+	log.LogDates(log.Stderr)
+	log.StdLogger.EntryHandler = alplog.OutputText(log.Stderr)
 }
 
 func main() {
@@ -149,7 +155,7 @@ func main() {
 		WriteTimeout: 60 * time.Second,
 	}
 
-	log.Printf("Listening on %q", conf.ListenAddr)
+	log.Infof("Listening on %q", conf.ListenAddr)
 	err = httpServer.Serve(listener)
 	if err != nil {
 		log.Fatalf("http listen: %s", err)

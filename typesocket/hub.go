@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	log "github.com/sirupsen/logrus"
+
+	"vuvuzela.io/alpenhorn/log"
 )
 
 // The Hub and serverConn methods are based on

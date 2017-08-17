@@ -13,13 +13,13 @@ import (
 	"sync/atomic"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/box"
 
 	"vuvuzela.io/alpenhorn/addfriend"
 	"vuvuzela.io/alpenhorn/coordinator"
 	"vuvuzela.io/alpenhorn/errors"
+	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/alpenhorn/typesocket"
 	"vuvuzela.io/concurrency"
@@ -365,7 +365,7 @@ func (c *Client) scanMailbox(conn typesocket.Conn, v coordinator.MailboxURL) {
 			var ctxt ibe.Ciphertext
 			ctxtBytes := mailbox[span.Start : span.Start+span.Count]
 			if err := ctxt.UnmarshalBinary(ctxtBytes); err != nil {
-				log.Printf("Unmarshal failure: %s", err)
+				log.Warnf("Unmarshal failure: %s", err)
 				continue
 			}
 
@@ -386,7 +386,7 @@ func (c *Client) decodeAddFriendMessage(msg []byte, verifiers []pkg.PublicServer
 	}
 
 	if !intro.Verify(multisigKeys) {
-		log.Printf("failed to verify intro: %s", intro.Username)
+		log.Warnf("failed to verify intro: %s", intro.Username)
 		return
 	}
 
