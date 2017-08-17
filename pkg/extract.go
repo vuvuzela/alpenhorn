@@ -140,7 +140,7 @@ func (srv *Server) extract(args *extractArgs) (*extractReply, error) {
 
 	if len(args.UserLongTermKey) != ed25519.PublicKeySize {
 		return nil, errorf(
-			ErrInvalidSigningKey,
+			ErrInvalidUserLongTermKey,
 			"got %d bytes, want %d",
 			len(args.UserLongTermKey),
 			ed25519.PublicKeySize,

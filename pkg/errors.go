@@ -25,7 +25,7 @@ const (
 	ErrRegistrationInProgress
 	ErrSendingEmail
 	ErrRoundNotFound
-	ErrInvalidSigningKey
+	ErrInvalidUserLongTermKey
 	ErrInvalidSignature
 	ErrInvalidToken
 	ErrExpiredToken
@@ -45,7 +45,7 @@ var errText = map[ErrorCode]string{
 	ErrRegistrationInProgress: "registration in progress",
 	ErrSendingEmail:           "error sending verification email",
 	ErrRoundNotFound:          "round not found",
-	ErrInvalidSigningKey:      "invalid signing key",
+	ErrInvalidUserLongTermKey: "invalid user long term key",
 	ErrInvalidSignature:       "invalid signature",
 	ErrInvalidToken:           "invalid token",
 	ErrExpiredToken:           "expired token",
