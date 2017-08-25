@@ -17,7 +17,6 @@ import (
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/ed25519"
 
-	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
 	"vuvuzela.io/alpenhorn/errors"
@@ -28,14 +27,15 @@ import (
 )
 
 var (
-	globalConfPath = flag.String("global", "", "global config file")
-	confPath       = flag.String("conf", "", "config file")
-	doinit         = flag.Bool("init", false, "create config file")
+	confPath = flag.String("conf", "", "config file")
+	doinit   = flag.Bool("init", false, "create config file")
 )
 
 type Config struct {
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
+
+	CoordinatorKey ed25519.PublicKey
 
 	DBName     string
 	ListenAddr string
@@ -49,6 +49,8 @@ const confTemplate = `# Alpenhorn PKG server config
 
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
+
+coordinatorKey = "change me"
 
 dbName = {{.DBName | printf "%q"}}
 listenAddr = {{.ListenAddr | printf "%q"}}
@@ -98,27 +100,9 @@ func main() {
 		return
 	}
 
-	if *globalConfPath == "" {
-		fmt.Println("specify global config file with -global")
-		os.Exit(1)
-	}
-
 	if *confPath == "" {
 		fmt.Println("specify config file with -conf")
 		os.Exit(1)
-	}
-
-	globalConf, err := config.ReadGlobalConfigFile(*globalConfPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	alpConf, err := globalConf.AlpenhornConfig()
-	if err != nil {
-		log.Fatalf("error reading alpenhorn config from %q: %s", *globalConfPath, err)
-	}
-	coordinatorKey := alpConf.Coordinator.Key
-	if coordinatorKey == nil {
-		log.Fatalf("no alpenhorn coordinator key specified in global config")
 	}
 
 	data, err := ioutil.ReadFile(*confPath)
@@ -138,7 +122,7 @@ func main() {
 	pkgConfig := &pkg.Config{
 		SigningKey:     conf.PrivateKey,
 		DBName:         conf.DBName,
-		CoordinatorKey: coordinatorKey,
+		CoordinatorKey: conf.CoordinatorKey,
 	}
 	pkgServer, err := pkg.NewServer(pkgConfig)
 	if err != nil {
@@ -168,6 +152,9 @@ func checkConfig(conf *Config) error {
 	}
 	if conf.DBName == "" {
 		return errors.New("no database name specified")
+	}
+	if len(conf.CoordinatorKey) != ed25519.PublicKeySize {
+		return errors.New("invalid coordinator key")
 	}
 	if len(conf.PrivateKey) != ed25519.PrivateKeySize {
 		return errors.New("invalid private key")
