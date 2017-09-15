@@ -14,11 +14,13 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"text/template"
 	"time"
 
 	"golang.org/x/crypto/ed25519"
 
+	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/coordinator"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
@@ -27,7 +29,8 @@ import (
 )
 
 var (
-	bootstrapPath = flag.String("bootstrap", "", "path to bootstrap config")
+	bootstrapPath = flag.String("bootstrapConfig", "", "path to bootstrap config")
+	doInit        = flag.Bool("init", false, "initialize the coordinator for the first time")
 )
 
 type Config struct {
@@ -70,48 +73,109 @@ dialingMailboxes   = {{.DialingMailboxes}}
 `
 
 type BootstrapConfig struct {
-	AddFriendStartingConfig *coordinator.AlpenhornConfig `mapstructure:"AddFriend"`
-	DialingStartingConfig   *coordinator.AlpenhornConfig `mapstructure:"Dialing"`
+	SignedConfigs
 }
 
-func doBootstrap() {
+type SignedConfigs struct {
+	AddFriend *config.SignedConfig
+	Dialing   *config.SignedConfig
+}
+
+var bootstrapConfig *BootstrapConfig
+
+func getBootstrapConfig() *BootstrapConfig {
+	if bootstrapConfig != nil {
+		return bootstrapConfig
+	}
+
+	if *bootstrapPath == "" {
+		fmt.Println("Please specify a bootstrap config with -bootstrapConfig.")
+		os.Exit(1)
+	}
+
+	data, err := ioutil.ReadFile(*bootstrapPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Let the toml decoder know how to decode the inner configs.
+	bootstrapConfig = &BootstrapConfig{
+		SignedConfigs: SignedConfigs{
+			AddFriend: &config.SignedConfig{
+				Inner: new(config.AddFriendConfig),
+			},
+
+			Dialing: &config.SignedConfig{
+				Inner: new(config.DialingConfig),
+			},
+		},
+	}
+	err = toml.Unmarshal(data, bootstrapConfig)
+	if err != nil {
+		log.Fatalf("error decoding toml from %s: %s", *bootstrapPath, err)
+	}
+
+	return bootstrapConfig
+}
+
+func initService(service string, confHome string) {
+	fmt.Printf("--> Initializing %q service.\n", service)
+	coordinatorPersistPath := filepath.Join(confHome, strings.ToLower(service)+"-coordinator-state")
+	configServerPersistPath := filepath.Join(confHome, strings.ToLower(service)+"-coordinator-configs")
+
+	doCoordinator := overwrite(coordinatorPersistPath)
+	doConfigServer := overwrite(configServerPersistPath)
+
+	if !doCoordinator && !doConfigServer {
+		fmt.Println("Nothing to do.")
+		return
+	}
+
+	if doConfigServer {
+		bootstrap := getBootstrapConfig()
+		var serviceConf *config.SignedConfig
+		switch service {
+		case "AddFriend":
+			serviceConf = bootstrap.AddFriend
+		case "Dialing":
+			serviceConf = bootstrap.Dialing
+		default:
+			log.Fatalf("unknown service %q", service)
+		}
+
+		if err := serviceConf.Validate(); err != nil {
+			log.Fatalf("invalid signed config for service %q: %s", service, err)
+		}
+
+		err := config.CreateServerState(configServerPersistPath, serviceConf)
+		if err != nil {
+			log.Fatalf("failed to create config server state for service %q: %s", service, err)
+		}
+
+		fmt.Printf("! Wrote config server state: %s\n", configServerPersistPath)
+	}
+
+	if doCoordinator {
+		server := &coordinator.Server{
+			Service:                 service,
+			PersistPath:             coordinatorPersistPath,
+			ConfigServerPersistPath: configServerPersistPath,
+		}
+		err := server.Persist()
+		if err != nil {
+			log.Fatalf("failed to create coordinator server state for service %q: %s", service, err)
+		}
+
+		fmt.Printf("! Wrote coordinator server state: %s\n", coordinatorPersistPath)
+	}
+}
+
+func initCoordinator() {
 	u, err := user.Current()
 	if err != nil {
 		log.Fatal(err)
 	}
 	confHome := filepath.Join(u.HomeDir, ".alpenhorn")
-
-	confPath := filepath.Join(confHome, "coordinator.conf")
-	addFriendStatePath := filepath.Join(confHome, "coordinator-addfriend-state")
-	dialingStatePath := filepath.Join(confHome, "coordinator-dialing-state")
-
-	doConf := overwrite(confPath)
-	doAddFriend := overwrite(addFriendStatePath)
-	doDialing := overwrite(dialingStatePath)
-
-	if !doConf && !doAddFriend && !doDialing {
-		fmt.Println("Nothing to do.")
-		os.Exit(0)
-	}
-
-	var bootstrap *BootstrapConfig
-	if doAddFriend || doDialing {
-		if *bootstrapPath == "" {
-			fmt.Println("Please specify a bootstrap config with -bootstrap.")
-			os.Exit(1)
-		}
-
-		data, err := ioutil.ReadFile(*bootstrapPath)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		bootstrap = new(BootstrapConfig)
-		err = toml.Unmarshal(data, bootstrap)
-		if err != nil {
-			log.Fatalf("error decoding toml from %s: %s", *bootstrapPath, err)
-		}
-	}
 
 	err = os.Mkdir(confHome, 0700)
 	if err == nil {
@@ -120,42 +184,14 @@ func doBootstrap() {
 		log.Fatal(err)
 	}
 
-	if doConf {
+	initService("AddFriend", confHome)
+	initService("Dialing", confHome)
+
+	fmt.Printf("--> Generating coordinator key pair and config.\n")
+	confPath := filepath.Join(confHome, "coordinator.conf")
+	if overwrite(confPath) {
 		writeNewConfig(confPath)
-	}
-
-	if doAddFriend {
-		if bootstrap.AddFriendStartingConfig == nil {
-			log.Fatalf("no addfriend config defined in %s", *bootstrapPath)
-		}
-		addFriendServer := &coordinator.Server{
-			Service:     "AddFriend",
-			PersistPath: addFriendStatePath,
-		}
-		err := addFriendServer.Bootstrap(bootstrap.AddFriendStartingConfig)
-		if err != nil {
-			log.Fatalf("error bootstrapping addfriend server: %s", err)
-		}
-		fmt.Printf("Wrote initial addfriend state: %s\n", addFriendStatePath)
-	}
-
-	if doDialing {
-		if bootstrap.DialingStartingConfig == nil {
-			log.Fatalf("no dialing config defined in %s", *bootstrapPath)
-		}
-		dialingServer := &coordinator.Server{
-			Service:     "Dialing",
-			PersistPath: dialingStatePath,
-		}
-		err := dialingServer.Bootstrap(bootstrap.DialingStartingConfig)
-		if err != nil {
-			log.Fatalf("error bootstrapping dialing server: %s", err)
-		}
-		fmt.Printf("Wrote initial dialing state: %s\n", dialingStatePath)
-	}
-
-	if doConf {
-		fmt.Printf("Please edit the config file before running the server.\n")
+		fmt.Printf("--> Please edit the config file before running the server.\n")
 	}
 }
 
@@ -191,18 +227,14 @@ func writeNewConfig(path string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Wrote new config file: %s\n", path)
-}
-
-func init() {
-	log.LogDates(log.Stderr)
+	fmt.Printf("! Wrote new config file: %s\n", path)
 }
 
 func main() {
 	flag.Parse()
 
-	if *bootstrapPath != "" {
-		doBootstrap()
+	if *doInit {
+		initCoordinator()
 		return
 	}
 
@@ -223,9 +255,10 @@ func main() {
 		log.Fatalf("error parsing config %s: %s", confPath, err)
 	}
 
+	log.LogDates(log.Stderr)
+
 	var addFriendServer *coordinator.Server
 	if conf.AddFriendMailboxes > 0 {
-		addFriendStatePath := filepath.Join(confHome, "coordinator-addfriend-state")
 		addFriendServer = &coordinator.Server{
 			Service:    "AddFriend",
 			PrivateKey: conf.PrivateKey,
@@ -240,19 +273,19 @@ func main() {
 
 			NumMailboxes: conf.AddFriendMailboxes,
 
-			PersistPath: addFriendStatePath,
+			PersistPath:             filepath.Join(confHome, "addfriend-coordinator-state"),
+			ConfigServerPersistPath: filepath.Join(confHome, "addfriend-coordinator-configs"),
 		}
 
 		err = addFriendServer.LoadPersistedState()
 		if err != nil {
-			log.Fatalf("error reading addfriend state from %s: %s", addFriendStatePath, err)
+			log.Fatalf("error loading addfriend state: %s", err)
 		}
 		http.Handle("/addfriend/", http.StripPrefix("/addfriend", addFriendServer))
 	}
 
 	var dialingServer *coordinator.Server
 	if conf.DialingMailboxes > 0 {
-		dialingStatePath := filepath.Join(confHome, "coordinator-dialing-state")
 		dialingServer = &coordinator.Server{
 			Service:    "Dialing",
 			PrivateKey: conf.PrivateKey,
@@ -266,12 +299,13 @@ func main() {
 
 			NumMailboxes: conf.DialingMailboxes,
 
-			PersistPath: dialingStatePath,
+			PersistPath:             filepath.Join(confHome, "dialing-coordinator-state"),
+			ConfigServerPersistPath: filepath.Join(confHome, "dialing-coordinator-configs"),
 		}
 
 		err = dialingServer.LoadPersistedState()
 		if err != nil {
-			log.Fatalf("error reading dialing state from %s: %s", dialingStatePath, err)
+			log.Fatalf("error loading dialing state: %s", err)
 		}
 		http.Handle("/dialing/", http.StripPrefix("/dialing", dialingServer))
 	}

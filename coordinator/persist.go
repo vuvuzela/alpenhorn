@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"vuvuzela.io/alpenhorn/errors"
+	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/internal/ioutil2"
 )
 
@@ -18,12 +18,16 @@ import (
 const version byte = 1
 
 type persistedState struct {
-	Round             uint32
-	CurrentConfigHash string
-	Configs           map[string]*AlpenhornConfig
+	Round uint32
 }
 
 func (srv *Server) LoadPersistedState() error {
+	configServer, err := config.LoadServer(srv.ConfigServerPersistPath)
+	if err != nil {
+		return err
+	}
+	srv.configServer = configServer
+
 	data, err := ioutil.ReadFile(srv.PersistPath)
 	if err != nil {
 		return err
@@ -45,49 +49,21 @@ func (srv *Server) LoadPersistedState() error {
 
 	srv.mu.Lock()
 	srv.round = st.Round
-	srv.allConfigs = st.Configs
-	srv.currentConfigHash = st.CurrentConfigHash
 	srv.mu.Unlock()
 
 	return nil
 }
 
-// Bootstrap initializes the server for the first time. It creates
-// the persisted state file for the server and sets the server's starting
-// config. Bootstrap does not verify signatures on the starting config, so
-// the config should be verified out-of-band. Future updates to the config
-// will be verified using the config's Guardian keys.
-//
-// Bootstrap should only be called once, before the server is launched
-// for the first time. Future launches of the server should call
-// LoadPersistedState at startup to read the current config from disk.
-func (srv *Server) Bootstrap(startingConfig *AlpenhornConfig) error {
-	if err := startingConfig.Validate(); err != nil {
-		return errors.Wrap(err, "invalid config")
-	}
-
+func (srv *Server) Persist() error {
 	srv.mu.Lock()
-	defer srv.mu.Unlock()
-
-	if srv.allConfigs == nil {
-		srv.allConfigs = make(map[string]*AlpenhornConfig)
-	}
-	hash := startingConfig.Hash()
-	srv.allConfigs[hash] = startingConfig
-	srv.currentConfigHash = hash
-
-	return srv.persistLocked()
+	err := srv.persistLocked()
+	srv.mu.Unlock()
+	return err
 }
 
 func (srv *Server) persistLocked() error {
-	if srv.PersistPath == "" {
-		return nil
-	}
-
 	st := &persistedState{
-		Round:             srv.round,
-		Configs:           srv.allConfigs,
-		CurrentConfigHash: srv.currentConfigHash,
+		Round: srv.round,
 	}
 
 	buf := new(bytes.Buffer)
