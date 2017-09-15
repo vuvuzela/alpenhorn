@@ -8,7 +8,7 @@ import (
 	"reflect"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
-	"github.com/mitchellh/mapstructure"
+	"github.com/davidlazar/mapstructure"
 )
 
 // Unmarshal parses the TOML-encoded data and stores the result in the
