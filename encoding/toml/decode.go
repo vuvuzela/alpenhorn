@@ -6,6 +6,7 @@ package toml
 
 import (
 	"reflect"
+	"time"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
 	"github.com/davidlazar/mapstructure"
@@ -26,6 +27,7 @@ func Unmarshal(data []byte, v interface{}) error {
 
 	hook := mapstructure.ComposeDecodeHookFunc(
 		stringToBytesHook,
+		stringToTimeHook,
 		mapstructure.StringToTimeDurationHookFunc(),
 	)
 
@@ -56,6 +58,17 @@ func stringToBytesHook(from reflect.Type, to reflect.Type, data interface{}) (in
 		return data, nil
 	}
 	return DecodeBytes(data.(string))
+}
+
+func stringToTimeHook(from reflect.Type, to reflect.Type, data interface{}) (interface{}, error) {
+	if from.Kind() != reflect.String {
+		return data, nil
+	}
+	if to != reflect.TypeOf(time.Time{}) {
+		return data, nil
+	}
+
+	return time.Parse(time.RFC3339, data.(string))
 }
 
 func parse(str string) (map[string]interface{}, error) {
