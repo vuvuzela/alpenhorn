@@ -1,218 +1,250 @@
-// Copyright 2016 David Lazar. All rights reserved.
+// Copyright 2017 David Lazar. All rights reserved.
 // Use of this source code is governed by the GNU AGPL
 // license that can be found in the LICENSE file.
 
-// Package config manages global server configuration.
 package config
 
 import (
-	"io/ioutil"
+	"bytes"
+	"crypto/sha512"
+	"encoding/json"
+	"reflect"
+	"sync"
+	"time"
 
+	"github.com/davidlazar/go-crypto/encoding/base32"
 	"golang.org/x/crypto/ed25519"
 
-	"vuvuzela.io/alpenhorn/encoding/toml"
 	"vuvuzela.io/alpenhorn/errors"
+	"vuvuzela.io/alpenhorn/mixnet"
+	"vuvuzela.io/alpenhorn/pkg"
 )
 
-type GlobalConfig interface {
-	// AlpenhornConfig returns the Alpenhorn configuration from a global
-	// config. It does not return an error if fields are missing, so the
-	// caller should validate required fields before using them.
-	AlpenhornConfig() (*AlpenhornConfig, error)
+// SignedConfig is an entry in a hash chain of configs.
+type SignedConfig struct {
+	Created        time.Time
+	Expires        time.Time
+	PrevConfigHash string
 
-	// VuvuzelaConfig returns the Vuvuzela configuration from a global
-	// config with the same caveat as AlpenhornConfig.
-	VuvuzelaConfig() (*VuvuzelaConfig, error)
+	// Service is the protocol the inner config corresponds to
+	// (e.g., "AddFriend", "Dialing", or "Convo").
+	Service string
+	Inner   InnerConfig
+
+	// Guardians is the set of keys that must sign the next config
+	// to replace this config.
+	Guardians []Guardian
+
+	// Signatures is a map from base32-encoded signing keys to signatures.
+	Signatures map[string][]byte
 }
 
-type AlpenhornConfig struct {
-	Coordinator Coordinator
-	PKGs        []PKG
-	Mixers      []Mixer
-	CDN         CDN
+type InnerConfig interface {
+	Validate() error
+
+	// The InnerConfig must be marshalable as JSON.
 }
 
-type VuvuzelaConfig struct {
-	Coordinator Coordinator
-	Mixers      []Mixer
+type Guardian struct {
+	Username string
+	Key      ed25519.PublicKey
 }
 
-type Coordinator struct {
-	Key           ed25519.PublicKey
-	ClientAddress string
-}
+const configVersion byte = 1
 
-type PKG struct {
-	Key                ed25519.PublicKey
-	ClientAddress      string
-	CoordinatorAddress string
-}
+func (c *SignedConfig) SigningMessage() []byte {
+	buf := new(bytes.Buffer)
+	buf.WriteString("SignedConfig")
+	buf.WriteByte(configVersion)
 
-type Mixer struct {
-	Key     ed25519.PublicKey
-	Address string
-}
+	clone := *c
+	clone.Signatures = nil
 
-type CDN struct {
-	Key     ed25519.PublicKey
-	Address string
-}
-
-// globalConfig and its corresponding types are used to
-// decode the TOML config file.
-type globalConfig struct {
-	Alpenhorn *alpenhornConfig
-	Vuvuzela  *vuvuzelaConfig
-	Keys      map[string]ed25519.PublicKey
-}
-
-type alpenhornConfig struct {
-	Coordinator coordinatorConfig
-	PKG         []pkgConfig
-	Mixer       []mixerConfig
-	CDN         cdnConfig
-}
-
-type coordinatorConfig struct {
-	Key           string // Key is an entry in the globalConfig.Keys map.
-	ClientAddress string
-}
-
-type pkgConfig struct {
-	Key                string
-	ClientAddress      string
-	CoordinatorAddress string
-}
-
-type mixerConfig struct {
-	Key     string
-	Address string
-}
-
-type cdnConfig struct {
-	Key     string
-	Address string
-}
-
-type vuvuzelaConfig struct {
-	Coordinator coordinatorConfig
-	Mixer       []mixerConfig
-}
-
-func (conf *globalConfig) getKey(keyName string) (ed25519.PublicKey, error) {
-	if keyName == "" {
-		return nil, nil
+	err := json.NewEncoder(buf).Encode(clone)
+	if err != nil {
+		panic(err)
 	}
-	key, ok := conf.Keys[keyName]
+
+	return buf.Bytes()
+}
+
+func VerifyConfigChain(configs ...*SignedConfig) error {
+	if len(configs) < 2 {
+		panic("short config chain")
+	}
+
+	for i, curr := range configs {
+		if i == len(configs)-1 {
+			break
+		}
+		prev := configs[i+1]
+
+		if curr.PrevConfigHash != prev.Hash() {
+			return errors.New("config %d: bad PrevConfigHash", i)
+		}
+
+		msg := curr.SigningMessage()
+		for _, guardian := range prev.Guardians {
+			keystr := base32.EncodeToString(guardian.Key)
+			sig, ok := curr.Signatures[keystr]
+			if !ok {
+				return errors.New("config %d: missing signature for key %s: %s", i, guardian.Username, keystr)
+			}
+			if !ed25519.Verify(guardian.Key, msg, sig) {
+				return errors.New("config %d: invalid signature for key %s: %s", i, guardian.Username, keystr)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *SignedConfig) Validate() error {
+	for i, guardian := range c.Guardians {
+		if len(guardian.Key) != ed25519.PublicKeySize {
+			return errors.New("invalid key for guardian %i: %v", i, guardian.Key)
+		}
+		if guardian.Username == "" {
+			return errors.New("invalid username for guardian %d: %q", i, guardian.Username)
+		}
+	}
+
+	if c.Service == "" {
+		return errors.New("empty service name")
+	}
+	if c.Inner == nil {
+		return errors.New("no inner config")
+	}
+	return c.Inner.Validate()
+}
+
+func (c *SignedConfig) Hash() string {
+	msg := c.SigningMessage()
+	h := sha512.Sum512_256(msg)
+	return base32.EncodeToString(h[:])
+}
+
+type configMsg struct {
+	Created        time.Time
+	Expires        time.Time
+	PrevConfigHash string
+
+	Service string
+	Inner   json.RawMessage
+
+	Guardians []Guardian
+
+	Signatures map[string][]byte
+}
+
+var (
+	registerMu sync.Mutex
+	// registeredServices is a map from service name (e.g., "AddFriend")
+	// to its corresponding inner config type.
+	registeredServices = make(map[string]reflect.Type)
+)
+
+func RegisterService(service string, innerConfigType InnerConfig) {
+	registerMu.Lock()
+	registeredServices[service] = reflect.TypeOf(innerConfigType).Elem()
+	registerMu.Unlock()
+}
+
+func init() {
+	RegisterService("AddFriend", &AddFriendConfig{})
+	RegisterService("Dialing", &DialingConfig{})
+}
+
+func (c *SignedConfig) UnmarshalJSON(data []byte) error {
+	msg := new(configMsg)
+	err := json.Unmarshal(data, msg)
+	if err != nil {
+		return err
+	}
+
+	registerMu.Lock()
+	innerType, ok := registeredServices[msg.Service]
+	registerMu.Unlock()
 	if !ok {
-		return nil, errors.New("key %q not found", keyName)
+		return errors.New("unregistered service unmarshaling config: %q", msg.Service)
 	}
-	return key, nil
+
+	rawInner := reflect.New(innerType).Interface()
+	err = json.Unmarshal(msg.Inner, rawInner)
+	if err != nil {
+		return err
+	}
+	inner := rawInner.(InnerConfig)
+
+	c.Created = msg.Created
+	c.Expires = msg.Expires
+	c.PrevConfigHash = msg.PrevConfigHash
+	c.Service = msg.Service
+	c.Inner = inner
+	c.Guardians = msg.Guardians
+	c.Signatures = msg.Signatures
+
+	return nil
 }
 
-func (conf *globalConfig) AlpenhornConfig() (*AlpenhornConfig, error) {
-	if conf.Alpenhorn == nil {
-		return nil, errors.New("no alpenhorn config")
-	}
-
-	coordinatorKey, err := conf.getKey(conf.Alpenhorn.Coordinator.Key)
-	if err != nil {
-		return nil, err
-	}
-	coordinator := Coordinator{
-		Key:           coordinatorKey,
-		ClientAddress: conf.Alpenhorn.Coordinator.ClientAddress,
-	}
-
-	pkgs := make([]PKG, len(conf.Alpenhorn.PKG))
-	for i, pkgConf := range conf.Alpenhorn.PKG {
-		key, err := conf.getKey(pkgConf.Key)
-		if err != nil {
-			return nil, err
-		}
-		pkgs[i] = PKG{
-			Key:                key,
-			ClientAddress:      pkgConf.ClientAddress,
-			CoordinatorAddress: pkgConf.CoordinatorAddress,
-		}
-	}
-
-	mixers := make([]Mixer, len(conf.Alpenhorn.Mixer))
-	for i, mixerConf := range conf.Alpenhorn.Mixer {
-		key, err := conf.getKey(mixerConf.Key)
-		if err != nil {
-			return nil, err
-		}
-		mixers[i] = Mixer{
-			Key:     key,
-			Address: mixerConf.Address,
-		}
-	}
-
-	cdnKey, err := conf.getKey(conf.Alpenhorn.CDN.Key)
-	if err != nil {
-		return nil, err
-	}
-	cdn := CDN{
-		Key:     cdnKey,
-		Address: conf.Alpenhorn.CDN.Address,
-	}
-
-	return &AlpenhornConfig{
-		Coordinator: coordinator,
-		PKGs:        pkgs,
-		Mixers:      mixers,
-		CDN:         cdn,
-	}, nil
+type AddFriendConfig struct {
+	PKGServers []pkg.PublicServerConfig
+	MixServers []mixnet.PublicServerConfig
+	CDNServer  CDNServerConfig
 }
 
-func (conf *globalConfig) VuvuzelaConfig() (*VuvuzelaConfig, error) {
-	if conf.Vuvuzela == nil {
-		return nil, errors.New("no vuvuzela config")
-	}
+type DialingConfig struct {
+	MixServers []mixnet.PublicServerConfig
+	CDNServer  CDNServerConfig
+}
 
-	coordinatorKey, err := conf.getKey(conf.Vuvuzela.Coordinator.Key)
-	if err != nil {
-		return nil, err
-	}
-	coordinator := Coordinator{
-		Key:           coordinatorKey,
-		ClientAddress: conf.Vuvuzela.Coordinator.ClientAddress,
-	}
+type CDNServerConfig struct {
+	Key     ed25519.PublicKey
+	Address string
+}
 
-	mixers := make([]Mixer, len(conf.Vuvuzela.Mixer))
-	for i, mixerConf := range conf.Vuvuzela.Mixer {
-		key, err := conf.getKey(mixerConf.Key)
-		if err != nil {
-			return nil, err
+func (c *AddFriendConfig) Validate() error {
+	for i, mix := range c.MixServers {
+		if len(mix.Key) != ed25519.PublicKeySize {
+			return errors.New("invalid key for mixer %d: %v", i, mix.Key)
 		}
-		mixers[i] = Mixer{
-			Key:     key,
-			Address: mixerConf.Address,
+		if mix.Address == "" {
+			return errors.New("empty address for mix server %d", i)
 		}
 	}
 
-	return &VuvuzelaConfig{
-		Coordinator: coordinator,
-		Mixers:      mixers,
-	}, nil
-}
-
-func decodeGlobalConfig(data []byte) (GlobalConfig, error) {
-	globalConf := new(globalConfig)
-	err := toml.Unmarshal(data, globalConf)
-	if err != nil {
-		return nil, err
+	if c.CDNServer.Address == "" {
+		return errors.New("empty address for cdn server")
+	}
+	if len(c.CDNServer.Key) != ed25519.PublicKeySize {
+		return errors.New("invalid key for cdn: %v", c.CDNServer.Key)
 	}
 
-	return globalConf, nil
-}
-
-func ReadGlobalConfigFile(path string) (GlobalConfig, error) {
-	data, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, err
+	for i, pkg := range c.PKGServers {
+		if len(pkg.Key) != ed25519.PublicKeySize {
+			return errors.New("invalid key for pkg %d: %v", i, pkg.Key)
+		}
+		if pkg.Address == "" {
+			return errors.New("empty address for pkg %d", i)
+		}
 	}
 
-	return decodeGlobalConfig(data)
+	return nil
+}
+
+func (c *DialingConfig) Validate() error {
+	for i, mix := range c.MixServers {
+		if len(mix.Key) != ed25519.PublicKeySize {
+			return errors.New("invalid key for mixer %d: %v", i, mix.Key)
+		}
+		if mix.Address == "" {
+			return errors.New("empty address for mix server %d", i)
+		}
+	}
+
+	if c.CDNServer.Address != "" && len(c.CDNServer.Key) != ed25519.PublicKeySize {
+		return errors.New("invalid key for cdn: %v", c.CDNServer.Key)
+	}
+
+	return nil
 }
