@@ -11,11 +11,11 @@ import (
 	"io/ioutil"
 	"net/url"
 
-	"vuvuzela.io/alpenhorn/coordinator"
+	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/errors"
 )
 
-func (c *Client) fetchMailbox(cdnConfig coordinator.CDNServerConfig, baseURL string, mailboxID uint32) ([]byte, error) {
+func (c *Client) fetchMailbox(cdnConfig config.CDNServerConfig, baseURL string, mailboxID uint32) ([]byte, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, errors.Wrap(err, "parsing mailbox url")

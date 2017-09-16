@@ -16,7 +16,7 @@ import (
 
 	"golang.org/x/crypto/ed25519"
 
-	"vuvuzela.io/alpenhorn/coordinator"
+	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/keywheel"
 	"vuvuzela.io/alpenhorn/pkg"
@@ -94,12 +94,12 @@ type Client struct {
 
 	addFriendRounds     map[uint32]*addFriendRoundState
 	addFriendConfigHash string
-	addFriendConfig     *coordinator.AlpenhornConfig
+	addFriendConfig     *config.SignedConfig
 	registrations       map[string]*pkg.Client
 
 	dialingRounds     map[uint32]*dialingRoundState
 	dialingConfigHash string
-	dialingConfig     *coordinator.AlpenhornConfig
+	dialingConfig     *config.SignedConfig
 
 	friends                map[string]*Friend
 	incomingFriendRequests []*IncomingFriendRequest

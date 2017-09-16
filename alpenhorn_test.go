@@ -18,6 +18,7 @@ import (
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/cdn"
+	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/coordinator"
 	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/edtls"
@@ -138,7 +139,7 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	log.Infof("Alice: sent friend request")
 
 	friendRequest := <-bob.Handler.(*chanHandler).receivedFriendRequest
-	currentConfig := u.addFriendServer.CurrentConfig()
+	currentConfig := u.addFriendServer.CurrentConfig().Inner.(*config.AddFriendConfig)
 	if !reflect.DeepEqual(currentConfig.PKGServers, friendRequest.Verifiers) {
 		t.Fatalf("unexpected verifiers list in friend request:\ngot:  %s\nwant: %s",
 			debug.Pretty(friendRequest.Verifiers), debug.Pretty(currentConfig.PKGServers))
@@ -209,16 +210,27 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	log.Infof("Alice: received call from Bob")
 
 	// Test adding a new PKG.
-	newAddFriendConfig := *u.addFriendServer.CurrentConfig()
-	newAddFriendConfig.PrevConfigHash = newAddFriendConfig.Hash()
-	newAddFriendConfig.Created = time.Now()
 	newPKG, err := mock.LaunchPKG(u.CoordinatorKey, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	log.Infof("Created new PKG server: %s", newPKG.Address)
-	newAddFriendConfig.PKGServers = append(newAddFriendConfig.PKGServers, newPKG.PublicServerConfig)
-	newConfigURL := fmt.Sprintf("https://%s/addfriend/newconfig", u.CoordinatorAddress)
+
+	prevAddFriendConfig := u.addFriendServer.CurrentConfig()
+	prevAddFriendInner := prevAddFriendConfig.Inner.(*config.AddFriendConfig)
+	newAddFriendConfig := &config.SignedConfig{
+		Created:        time.Now(),
+		Expires:        time.Now().Add(24 * time.Hour),
+		PrevConfigHash: prevAddFriendConfig.Hash(),
+
+		Service: "AddFriend",
+		Inner: &config.AddFriendConfig{
+			MixServers: prevAddFriendInner.MixServers,
+			PKGServers: append(prevAddFriendInner.PKGServers, newPKG.PublicServerConfig),
+			CDNServer:  prevAddFriendInner.CDNServer,
+		},
+	}
+	newConfigURL := fmt.Sprintf("https://%s/addfriend/config/new", u.CoordinatorAddress)
 	resp, err := (&edhttp.Client{}).PostJSON(u.CoordinatorKey, newConfigURL, newAddFriendConfig)
 	if err != nil {
 		t.Fatal(err)
@@ -239,8 +251,8 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 
 	friendRequest = <-alice.Handler.(*chanHandler).receivedFriendRequest
 	// No guarantee that Verifiers will be in the same order but it works for now:
-	if !reflect.DeepEqual(friendRequest.Verifiers, newAddFriendConfig.PKGServers) {
-		t.Fatalf("unexpected verifiers:\ngot:  %#v\nwant: %#v", friendRequest.Verifiers, newAddFriendConfig.PKGServers)
+	if !reflect.DeepEqual(friendRequest.Verifiers, newAddFriendConfig.Inner.(*config.AddFriendConfig).PKGServers) {
+		t.Fatalf("unexpected verifiers:\ngot:  %s\nwant: %s", debug.Pretty(friendRequest.Verifiers), debug.Pretty(newAddFriendConfig.Inner.(*config.AddFriendConfig).PKGServers))
 	}
 	log.Infof("Alice: received friend request from Bob")
 
@@ -268,10 +280,20 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	// Add more servers to the end of the addfriend mixchain.
 	newChain := mock.LaunchMixchain(2, u.CoordinatorKey)
 
-	newAddFriendConfig = *u.addFriendServer.CurrentConfig()
-	newAddFriendConfig.PrevConfigHash = newAddFriendConfig.Hash()
-	newAddFriendConfig.Created = time.Now()
-	newAddFriendConfig.MixServers = append(newAddFriendConfig.MixServers, newChain.Servers...)
+	prevAddFriendConfig = u.addFriendServer.CurrentConfig()
+	prevAddFriendInner = prevAddFriendConfig.Inner.(*config.AddFriendConfig)
+	newAddFriendConfig = &config.SignedConfig{
+		Created:        time.Now(),
+		Expires:        time.Now().Add(24 * time.Hour),
+		PrevConfigHash: prevAddFriendConfig.Hash(),
+
+		Service: "AddFriend",
+		Inner: &config.AddFriendConfig{
+			MixServers: append(prevAddFriendInner.MixServers, newChain.Servers...),
+			PKGServers: prevAddFriendInner.PKGServers,
+			CDNServer:  prevAddFriendInner.CDNServer,
+		},
+	}
 
 	resp, err = (&edhttp.Client{}).PostJSON(u.CoordinatorKey, newConfigURL, newAddFriendConfig)
 	if err != nil {
@@ -306,12 +328,20 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	log.Infof("Bob: confirmed friend")
 
 	// Add more servers to the dialing mixchain.
-	newDialingConfig := *u.dialingServer.CurrentConfig()
-	newDialingConfig.PrevConfigHash = newDialingConfig.Hash()
-	newDialingConfig.Created = time.Now()
-	newDialingConfig.MixServers = append(newDialingConfig.MixServers, newChain.Servers...)
+	prevDialingConfig := u.dialingServer.CurrentConfig()
+	newDialingConfig := &config.SignedConfig{
+		Created:        time.Now(),
+		Expires:        time.Now().Add(24 * time.Hour),
+		PrevConfigHash: prevDialingConfig.Hash(),
 
-	newConfigURL = fmt.Sprintf("https://%s/dialing/newconfig", u.CoordinatorAddress)
+		Service: "Dialing",
+		Inner: &config.DialingConfig{
+			MixServers: append(prevDialingConfig.Inner.(*config.DialingConfig).MixServers, newChain.Servers...),
+			CDNServer:  prevDialingConfig.Inner.(*config.DialingConfig).CDNServer,
+		},
+	}
+
+	newConfigURL = fmt.Sprintf("https://%s/dialing/config/new", u.CoordinatorAddress)
 	resp, err = (&edhttp.Client{}).PostJSON(u.CoordinatorKey, newConfigURL, newDialingConfig)
 	if err != nil {
 		t.Fatal(err)
@@ -397,20 +427,27 @@ func createAlpenhornUniverse() *universe {
 		u.PKGs[i] = srv
 	}
 
-	addFriendConfig := &coordinator.AlpenhornConfig{
-		Service: "AddFriend",
+	addFriendConfig := &config.SignedConfig{
 		Created: time.Now(),
 		Expires: time.Now().Add(24 * time.Hour),
 
-		PKGServers: make([]pkg.PublicServerConfig, len(u.PKGs)),
-		MixServers: u.Mixchain.Servers,
-		CDNServer: coordinator.CDNServerConfig{
-			Key:     u.CDN.PublicKey,
-			Address: u.CDN.Addr,
+		Service: "AddFriend",
+		Inner: &config.AddFriendConfig{
+			PKGServers: make([]pkg.PublicServerConfig, len(u.PKGs)),
+			MixServers: u.Mixchain.Servers,
+			CDNServer: config.CDNServerConfig{
+				Key:     u.CDN.PublicKey,
+				Address: u.CDN.Addr,
+			},
 		},
 	}
 	for i, pkgServer := range u.PKGs {
-		addFriendConfig.PKGServers[i] = pkgServer.PublicServerConfig
+		addFriendConfig.Inner.(*config.AddFriendConfig).PKGServers[i] = pkgServer.PublicServerConfig
+	}
+	addFriendConfigsPath := filepath.Join(u.Dir, "addfriend-coordinator-configs")
+	err = config.CreateServerState(addFriendConfigsPath, addFriendConfig)
+	if err != nil {
+		log.Panicf("error creating config server state: %s", err)
 	}
 
 	u.addFriendServer = &coordinator.Server{
@@ -426,18 +463,38 @@ func createAlpenhornUniverse() *universe {
 		RoundWait:    2 * time.Second,
 		NumMailboxes: 1,
 
-		PersistPath: filepath.Join(u.Dir, "addfriend-coordinator-state"),
+		PersistPath:             filepath.Join(u.Dir, "addfriend-coordinator-state"),
+		ConfigServerPersistPath: addFriendConfigsPath,
 	}
-
-	if err := u.addFriendServer.Bootstrap(addFriendConfig); err != nil {
-		log.Panicf("bootstrapping addfriend server: %s", err)
+	if err := u.addFriendServer.Persist(); err != nil {
+		log.Panicf("error persisting addfriend server: %s", err)
+	}
+	if err := u.addFriendServer.LoadPersistedState(); err != nil {
+		log.Panicf("error loading persisted state: %s", err)
 	}
 	if err := u.addFriendServer.Run(); err != nil {
 		log.Panicf("starting addfriend loop: %s", err)
 	}
 
-	dialingConfig := *addFriendConfig
-	dialingConfig.Service = "Dialing"
+	dialingConfig := &config.SignedConfig{
+		Created: time.Now(),
+		Expires: time.Now().Add(24 * time.Hour),
+
+		Service: "Dialing",
+		Inner: &config.DialingConfig{
+			MixServers: u.Mixchain.Servers,
+			CDNServer: config.CDNServerConfig{
+				Key:     u.CDN.PublicKey,
+				Address: u.CDN.Addr,
+			},
+		},
+	}
+	dialingConfigsPath := filepath.Join(u.Dir, "dialing-coordinator-configs")
+	err = config.CreateServerState(dialingConfigsPath, dialingConfig)
+	if err != nil {
+		log.Panicf("error creating config server state: %s", err)
+	}
+
 	u.dialingServer = &coordinator.Server{
 		Service:    "Dialing",
 		PrivateKey: coordinatorPrivate,
@@ -450,11 +507,14 @@ func createAlpenhornUniverse() *universe {
 		RoundWait:    2 * time.Second,
 		NumMailboxes: 1,
 
-		PersistPath: filepath.Join(u.Dir, "dialing-coordinator-state"),
+		PersistPath:             filepath.Join(u.Dir, "dialing-coordinator-state"),
+		ConfigServerPersistPath: dialingConfigsPath,
 	}
-
-	if err := u.dialingServer.Bootstrap(&dialingConfig); err != nil {
-		log.Panicf("bootstrapping dialing server: %s", err)
+	if err := u.dialingServer.Persist(); err != nil {
+		log.Panicf("error persisting dialing server: %s", err)
+	}
+	if err := u.dialingServer.LoadPersistedState(); err != nil {
+		log.Panicf("error loading persisted state: %s", err)
 	}
 	if err := u.dialingServer.Run(); err != nil {
 		log.Panicf("starting dialing loop: %s", err)

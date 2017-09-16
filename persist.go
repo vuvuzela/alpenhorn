@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/crypto/ed25519"
 
-	"vuvuzela.io/alpenhorn/coordinator"
+	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/internal/ioutil2"
 )
@@ -24,8 +24,8 @@ type persistedState struct {
 	CoordinatorAddress string
 	CoordinatorKey     ed25519.PublicKey
 
-	AddFriendConfig *coordinator.AlpenhornConfig
-	DialingConfig   *coordinator.AlpenhornConfig
+	AddFriendConfig *config.SignedConfig
+	DialingConfig   *config.SignedConfig
 
 	IncomingFriendRequests []*IncomingFriendRequest
 	OutgoingFriendRequests []*OutgoingFriendRequest

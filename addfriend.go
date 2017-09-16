@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding"
 	"encoding/hex"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -17,6 +18,7 @@ import (
 	"golang.org/x/crypto/nacl/box"
 
 	"vuvuzela.io/alpenhorn/addfriend"
+	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/coordinator"
 	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/log"
@@ -29,8 +31,11 @@ import (
 )
 
 type addFriendRoundState struct {
-	Round  uint32
-	Config *coordinator.AlpenhornConfig
+	Round uint32
+
+	// We keep a pointer to the inner config to avoid extra type assertions.
+	Config       *config.AddFriendConfig
+	ConfigParent *config.SignedConfig
 
 	mu               sync.Mutex
 	ServerMasterKeys []*ibe.MasterPublicKey
@@ -59,7 +64,7 @@ func (c *Client) newAddFriendRound(conn typesocket.Conn, v coordinator.NewRound)
 
 	st, ok := c.addFriendRounds[v.Round]
 	if ok {
-		if st.Config.Hash() != v.ConfigHash {
+		if st.ConfigParent.Hash() != v.ConfigHash {
 			c.Handler.Error(errors.New("coordinator announced different configs round %d", v.Round))
 		}
 		return
@@ -68,36 +73,45 @@ func (c *Client) newAddFriendRound(conn typesocket.Conn, v coordinator.NewRound)
 	// common case
 	if v.ConfigHash == c.addFriendConfigHash {
 		c.addFriendRounds[v.Round] = &addFriendRoundState{
-			Round:  v.Round,
-			Config: c.addFriendConfig,
+			Round:        v.Round,
+			Config:       c.addFriendConfig.Inner.(*config.AddFriendConfig),
+			ConfigParent: c.addFriendConfig,
 		}
 		return
 	}
 
-	config, err := c.fetchAndVerifyConfig(c.addFriendConfig, v.ConfigHash)
+	newConfig, err := config.Client{
+		ConfigURL:  fmt.Sprintf("https://%s/addfriend/config", c.CoordinatorAddress),
+		ServerKey:  c.CoordinatorKey,
+		HTTPClient: c.edhttpClient,
+	}.FetchAndVerifyConfig(c.addFriendConfig, v.ConfigHash)
 	if err != nil {
 		c.Handler.Error(errors.Wrap(err, "fetching addfriend config"))
 		return
 	}
 
+	addFriendConfig := c.loadAddFriendConfig(newConfig)
+
 	c.addFriendRounds[v.Round] = &addFriendRoundState{
-		Round:  v.Round,
-		Config: config,
+		Round:        v.Round,
+		Config:       addFriendConfig,
+		ConfigParent: newConfig,
 	}
 
-	c.loadAddFriendConfig(config)
 }
 
 // assumes c.mu is locked
-func (c *Client) loadAddFriendConfig(config *coordinator.AlpenhornConfig) {
-	c.addFriendConfig = config
-	c.addFriendConfigHash = config.Hash()
+func (c *Client) loadAddFriendConfig(newConfig *config.SignedConfig) *config.AddFriendConfig {
+	c.addFriendConfig = newConfig
+	c.addFriendConfigHash = newConfig.Hash()
 
 	if c.registrations == nil {
 		c.registrations = make(map[string]*pkg.Client)
 	}
 
-	for _, pkgServer := range config.PKGServers {
+	innerConfig := newConfig.Inner.(*config.AddFriendConfig)
+
+	for _, pkgServer := range innerConfig.PKGServers {
 		id := regid(pkgServer.Key, c.Username)
 		pkgc := c.registrations[id]
 		if pkgc != nil {
@@ -135,6 +149,8 @@ func (c *Client) loadAddFriendConfig(config *coordinator.AlpenhornConfig) {
 	if err := c.persistLocked(); err != nil {
 		panic("failed to persist state: " + err.Error())
 	}
+
+	return innerConfig
 }
 
 func (c *Client) extractPKGKeys(conn typesocket.Conn, v coordinator.PKGRound) {

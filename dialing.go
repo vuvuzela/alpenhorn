@@ -6,12 +6,14 @@ package alpenhorn
 
 import (
 	"crypto/rand"
+	"fmt"
 	"sync/atomic"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/bloom"
+	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/coordinator"
 	"vuvuzela.io/alpenhorn/dialing"
 	"vuvuzela.io/alpenhorn/errors"
@@ -21,8 +23,9 @@ import (
 )
 
 type dialingRoundState struct {
-	Round  uint32
-	Config *coordinator.AlpenhornConfig
+	Round        uint32
+	Config       *config.DialingConfig
+	ConfigParent *config.SignedConfig
 }
 
 func (c *Client) dialingMux() typesocket.Mux {
@@ -44,7 +47,7 @@ func (c *Client) newDialingRound(conn typesocket.Conn, v coordinator.NewRound) {
 
 	st, ok := c.dialingRounds[v.Round]
 	if ok {
-		if st.Config.Hash() != v.ConfigHash {
+		if st.ConfigParent.Hash() != v.ConfigHash {
 			c.Handler.Error(errors.New("coordinator announced different configs round %d", v.Round))
 		}
 		return
@@ -53,28 +56,34 @@ func (c *Client) newDialingRound(conn typesocket.Conn, v coordinator.NewRound) {
 	// common case
 	if v.ConfigHash == c.dialingConfigHash {
 		c.dialingRounds[v.Round] = &dialingRoundState{
-			Round:  v.Round,
-			Config: c.dialingConfig,
+			Round:        v.Round,
+			Config:       c.dialingConfig.Inner.(*config.DialingConfig),
+			ConfigParent: c.dialingConfig,
 		}
 		return
 	}
 
-	config, err := c.fetchAndVerifyConfig(c.dialingConfig, v.ConfigHash)
+	newConfig, err := config.Client{
+		ConfigURL:  fmt.Sprintf("https://%s/dialing/config", c.CoordinatorAddress),
+		ServerKey:  c.CoordinatorKey,
+		HTTPClient: c.edhttpClient,
+	}.FetchAndVerifyConfig(c.dialingConfig, v.ConfigHash)
 	if err != nil {
 		c.Handler.Error(errors.Wrap(err, "fetching dialing config"))
 		return
 	}
 
-	c.dialingRounds[v.Round] = &dialingRoundState{
-		Round:  v.Round,
-		Config: config,
-	}
-
-	c.dialingConfig = config
+	c.dialingConfig = newConfig
 	c.dialingConfigHash = v.ConfigHash
 
 	if err := c.persistLocked(); err != nil {
 		panic("failed to persist state: " + err.Error())
+	}
+
+	c.dialingRounds[v.Round] = &dialingRoundState{
+		Round:        v.Round,
+		Config:       newConfig.Inner.(*config.DialingConfig),
+		ConfigParent: newConfig,
 	}
 }
 
