@@ -42,6 +42,7 @@ type addFriendRoundState struct {
 	PrivateKeys      []*ibe.IdentityPrivateKey
 	ServerBLSKeys    []*bls.PublicKey
 	IdentitySigs     []bls.Signature
+	ExtractSuccess   bool
 }
 
 func (c *Client) addFriendMux() typesocket.Mux {
@@ -221,6 +222,8 @@ func (c *Client) extractPKGKeys(conn typesocket.Conn, v coordinator.PKGRound) {
 		}
 		st.IdentitySigs[i] = extractResult.IdentitySig
 	}
+
+	st.ExtractSuccess = true
 }
 
 var zeroNonce = new([24]byte)
@@ -251,6 +254,11 @@ func (c *Client) sendAddFriendOnion(conn typesocket.Conn, v coordinator.MixRound
 
 	st.mu.Lock()
 	defer st.mu.Unlock()
+
+	if !st.ExtractSuccess {
+		c.Handler.Error(errors.New("sendAddFriendOnion: incomplete extraction for round %d", round))
+		return
+	}
 
 	outgoingReq := c.nextOutgoingFriendRequest()
 	intro, sentReq := c.genIntro(st, outgoingReq)
@@ -370,6 +378,11 @@ func (c *Client) scanMailbox(conn typesocket.Conn, v coordinator.MailboxURL) {
 	}
 
 	st.mu.Lock()
+	if !st.ExtractSuccess {
+		st.mu.Unlock()
+		c.Handler.Error(errors.New("scanMailbox: incomplete extraction for round %d", v.Round))
+		return
+	}
 	privKey := new(ibe.IdentityPrivateKey).Aggregate(st.PrivateKeys...)
 	st.mu.Unlock()
 
