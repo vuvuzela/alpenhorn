@@ -134,6 +134,10 @@ func (c *Client) Extract(round uint32) (*ExtractResult, error) {
 	if !reply.Verify(c.PublicServerConfig.Key) {
 		return nil, errors.New("invalid signature")
 	}
+	// TODO un-hardcode 64
+	if len(reply.IdentitySig) != 64 {
+		return nil, errors.New("invalid identity signature: got %d bytes, want %d", len(reply.IdentitySig), 64)
+	}
 
 	theirPub := new([32]byte)
 	copy(theirPub[:], reply.EncryptedPrivateKey[0:32])
