@@ -20,7 +20,11 @@ import (
 	"vuvuzela.io/alpenhorn/pkg"
 )
 
+// Use github.com/davidlazar/easyjson:
+//go:generate easyjson .
+
 // SignedConfig is an entry in a hash chain of configs.
+//easyjson:nounmarshal,readable
 type SignedConfig struct {
 	Created        time.Time
 	Expires        time.Time
@@ -45,6 +49,7 @@ type InnerConfig interface {
 	// The InnerConfig must be marshalable as JSON.
 }
 
+//easyjson:readable
 type Guardian struct {
 	Username string
 	Key      ed25519.PublicKey
@@ -124,6 +129,7 @@ func (c *SignedConfig) Hash() string {
 	return base32.EncodeToString(h[:])
 }
 
+//easyjson:readable
 type configMsg struct {
 	Created        time.Time
 	Expires        time.Time
@@ -187,17 +193,20 @@ func (c *SignedConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+//easyjson:readable
 type AddFriendConfig struct {
 	PKGServers []pkg.PublicServerConfig
 	MixServers []mixnet.PublicServerConfig
 	CDNServer  CDNServerConfig
 }
 
+//easyjson:readable
 type DialingConfig struct {
 	MixServers []mixnet.PublicServerConfig
 	CDNServer  CDNServerConfig
 }
 
+//easyjson:readable
 type CDNServerConfig struct {
 	Key     ed25519.PublicKey
 	Address string

@@ -28,7 +28,7 @@ import (
 // ownership of the username, unless the PKG server is running in
 // first-come-first-serve mode.
 type Client struct {
-	PublicServerConfig
+	PublicServerConfig PublicServerConfig
 
 	// Username is identity in Identity-Based Encryption.
 	Username string

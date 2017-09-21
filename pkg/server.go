@@ -30,6 +30,9 @@ import (
 	"vuvuzela.io/crypto/ibe"
 )
 
+// Use github.com/davidlazar/easyjson:
+//go:generate easyjson server.go
+
 // A Server is a Private Key Generator (PKG).
 type Server struct {
 	db       *sql.DB
@@ -360,6 +363,7 @@ func (s RoundSettings) Verify(round uint32, keys []ed25519.PublicKey) bool {
 	return true
 }
 
+//easyjson:readable
 type PublicServerConfig struct {
 	Key     ed25519.PublicKey
 	Address string

@@ -202,7 +202,7 @@ func (c *Client) extractPKGKeys(conn typesocket.Conn, v coordinator.PKGRound) {
 
 		extractResult, err := pkgc.Extract(v.Round)
 		if err != nil {
-			c.Handler.Error(errors.Wrap(err, "round %d: error extracting private key from %s", v.Round, pkgc.Address))
+			c.Handler.Error(errors.Wrap(err, "round %d: error extracting private key from %s", v.Round, pkgc.PublicServerConfig.Address))
 			return
 		}
 		hexkey := hex.EncodeToString(pkgc.PublicServerConfig.Key)
@@ -216,7 +216,7 @@ func (c *Client) extractPKGKeys(conn typesocket.Conn, v coordinator.PKGRound) {
 			UserLongTermKey: c.LongTermPublicKey,
 		}
 		if !bls.Verify(st.ServerBLSKeys[i:i+1], [][]byte{attestation.Marshal()}, extractResult.IdentitySig) {
-			log.Errorf("pkg %s gave us an invalid identity signature", pkgc.Address)
+			log.Errorf("pkg %s gave us an invalid identity signature", pkgc.PublicServerConfig.Address)
 			return
 		}
 		st.IdentitySigs[i] = extractResult.IdentitySig

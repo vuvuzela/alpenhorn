@@ -34,6 +34,9 @@ import (
 	"vuvuzela.io/crypto/shuffle"
 )
 
+// Use github.com/davidlazar/easyjson:
+//go:generate easyjson mixnet.go
+
 // MixService provides functionality needed by a mixnet Server.
 type MixService interface {
 	// MessageSize returns the expected size of messages in bytes
@@ -494,6 +497,7 @@ End:
 	return
 }
 
+//easyjson:readable
 type PublicServerConfig struct {
 	Key     ed25519.PublicKey
 	Address string

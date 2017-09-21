@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -73,7 +74,7 @@ dialingMailboxes   = {{.DialingMailboxes}}
 `
 
 type BootstrapConfig struct {
-	SignedConfigs
+	SignedConfigs SignedConfigs
 }
 
 type SignedConfigs struct {
@@ -98,21 +99,10 @@ func getBootstrapConfig() *BootstrapConfig {
 		log.Fatal(err)
 	}
 
-	// Let the toml decoder know how to decode the inner configs.
-	bootstrapConfig = &BootstrapConfig{
-		SignedConfigs: SignedConfigs{
-			AddFriend: &config.SignedConfig{
-				Inner: new(config.AddFriendConfig),
-			},
-
-			Dialing: &config.SignedConfig{
-				Inner: new(config.DialingConfig),
-			},
-		},
-	}
-	err = toml.Unmarshal(data, bootstrapConfig)
+	bootstrapConfig := new(BootstrapConfig)
+	err = json.Unmarshal(data, bootstrapConfig)
 	if err != nil {
-		log.Fatalf("error decoding toml from %s: %s", *bootstrapPath, err)
+		log.Fatalf("error decoding json from %s: %s", *bootstrapPath, err)
 	}
 
 	return bootstrapConfig
@@ -136,13 +126,16 @@ func initService(service string, confHome string) {
 		var serviceConf *config.SignedConfig
 		switch service {
 		case "AddFriend":
-			serviceConf = bootstrap.AddFriend
+			serviceConf = bootstrap.SignedConfigs.AddFriend
 		case "Dialing":
-			serviceConf = bootstrap.Dialing
+			serviceConf = bootstrap.SignedConfigs.Dialing
 		default:
 			log.Fatalf("unknown service %q", service)
 		}
 
+		if serviceConf == nil {
+			log.Fatalf("no %q config in bootstrap config", service)
+		}
 		if err := serviceConf.Validate(); err != nil {
 			log.Fatalf("invalid signed config for service %q: %s", service, err)
 		}
