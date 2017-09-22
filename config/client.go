@@ -23,7 +23,10 @@ type Client struct {
 	HTTPClient *edhttp.Client
 }
 
-func (c Client) FetchAndVerifyConfig(have *SignedConfig, want string) (*SignedConfig, error) {
+// FetchAndVerifyConfig fetches and verifies a config chain starting with
+// the have config and ending with the want config. The chain is returned
+// in reverse order so chain[0].Hash() = want and chain[len(chain)-1] = have.
+func (c Client) FetchAndVerifyConfig(have *SignedConfig, want string) ([]*SignedConfig, error) {
 	url := fmt.Sprintf("%s/get?have=%s&want=%s", c.ConfigURL, have.Hash(), want)
 	resp, err := c.HTTPClient.Get(c.ServerKey, url)
 	if err != nil {
@@ -38,6 +41,9 @@ func (c Client) FetchAndVerifyConfig(have *SignedConfig, want string) (*SignedCo
 	var configs []*SignedConfig
 	if err := json.NewDecoder(resp.Body).Decode(&configs); err != nil {
 		return nil, errors.Wrap(err, "unmarshaling configs")
+	}
+	if len(configs) == 0 {
+		return nil, errors.New("no configs returned from server")
 	}
 
 	newConfig := configs[0]
@@ -63,5 +69,5 @@ func (c Client) FetchAndVerifyConfig(have *SignedConfig, want string) (*SignedCo
 		return nil, errors.Wrap(err, "failed to verify new config")
 	}
 
-	return newConfig, nil
+	return configs, nil
 }

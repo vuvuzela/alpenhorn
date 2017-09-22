@@ -52,6 +52,11 @@ type EventHandler interface {
 
 	// ReceivedCall is called when the client receives a call from a friend.
 	ReceivedCall(*IncomingCall)
+
+	// NewConfig is called when the configuration for the add-friend or dialing
+	// protocol changes. The chain starts with the new config and ends with the
+	// client's previous config.
+	NewConfig(chain []*config.SignedConfig)
 }
 
 type Client struct {

@@ -81,7 +81,7 @@ func (c *Client) newAddFriendRound(conn typesocket.Conn, v coordinator.NewRound)
 		return
 	}
 
-	newConfig, err := config.Client{
+	configs, err := config.Client{
 		ConfigURL:  fmt.Sprintf("https://%s/addfriend/config", c.CoordinatorAddress),
 		ServerKey:  c.CoordinatorKey,
 		HTTPClient: c.edhttpClient,
@@ -91,6 +91,10 @@ func (c *Client) newAddFriendRound(conn typesocket.Conn, v coordinator.NewRound)
 		return
 	}
 
+	// notify the application
+	c.Handler.NewConfig(configs)
+
+	newConfig := configs[0]
 	addFriendConfig := c.loadAddFriendConfig(newConfig)
 
 	c.addFriendRounds[v.Round] = &addFriendRoundState{

@@ -38,6 +38,7 @@ type chanHandler struct {
 	receivedFriendRequest chan *IncomingFriendRequest
 	sentCall              chan *OutgoingCall
 	receivedCall          chan *IncomingCall
+	newConfig             chan []*config.SignedConfig
 }
 
 func newChanHandler(errPrefix string) *chanHandler {
@@ -48,6 +49,7 @@ func newChanHandler(errPrefix string) *chanHandler {
 		receivedFriendRequest: make(chan *IncomingFriendRequest, 1),
 		sentCall:              make(chan *OutgoingCall, 1),
 		receivedCall:          make(chan *IncomingCall, 1),
+		newConfig:             make(chan []*config.SignedConfig, 1),
 	}
 }
 
@@ -68,6 +70,9 @@ func (h *chanHandler) SentCall(call *OutgoingCall) {
 }
 func (h *chanHandler) ReceivedCall(call *IncomingCall) {
 	h.receivedCall <- call
+}
+func (h *chanHandler) NewConfig(configs []*config.SignedConfig) {
+	h.newConfig <- configs
 }
 func (h *chanHandler) UnexpectedSigningKey(in *IncomingFriendRequest, out *OutgoingFriendRequest) {
 	log.Fatalf("unexpected signing key for %s", in.Username)
@@ -241,7 +246,14 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	}
 	log.Infof("Uploaded new addfriend config")
 
-	time.Sleep(2 * time.Second)
+	confs := <-bob2.Handler.(*chanHandler).newConfig
+	if confs[0].Hash() != newAddFriendConfig.Hash() {
+		t.Fatalf("received unexpected config: %s", debug.Pretty(confs))
+	}
+	confs = <-alice.Handler.(*chanHandler).newConfig
+	if confs[0].Hash() != newAddFriendConfig.Hash() {
+		t.Fatalf("received unexpected config: %s", debug.Pretty(confs))
+	}
 
 	_, err = bob2.SendFriendRequest(alice.Username, nil)
 	if err != nil {
@@ -305,7 +317,14 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	}
 	log.Infof("Uploaded new addfriend config")
 
-	time.Sleep(2 * time.Second)
+	confs = <-bob2.Handler.(*chanHandler).newConfig
+	if confs[0].Hash() != newAddFriendConfig.Hash() {
+		t.Fatalf("received unexpected config: %s", debug.Pretty(confs))
+	}
+	confs = <-alice.Handler.(*chanHandler).newConfig
+	if confs[0].Hash() != newAddFriendConfig.Hash() {
+		t.Fatalf("received unexpected config: %s", debug.Pretty(confs))
+	}
 
 	_, err = bob2.SendFriendRequest(alice.Username, nil)
 	if err != nil {
@@ -352,7 +371,14 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	}
 	log.Infof("Uploaded new dialing config")
 
-	time.Sleep(2 * time.Second)
+	confs = <-bob2.Handler.(*chanHandler).newConfig
+	if confs[0].Hash() != newDialingConfig.Hash() {
+		t.Fatalf("received unexpected config: %s", debug.Pretty(confs))
+	}
+	confs = <-alice.Handler.(*chanHandler).newConfig
+	if confs[0].Hash() != newDialingConfig.Hash() {
+		t.Fatalf("received unexpected config: %s", debug.Pretty(confs))
+	}
 
 	friend = alice.GetFriend(bob2.Username)
 	friend.Call(2)

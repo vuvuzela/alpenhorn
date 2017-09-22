@@ -63,7 +63,7 @@ func (c *Client) newDialingRound(conn typesocket.Conn, v coordinator.NewRound) {
 		return
 	}
 
-	newConfig, err := config.Client{
+	configs, err := config.Client{
 		ConfigURL:  fmt.Sprintf("https://%s/dialing/config", c.CoordinatorAddress),
 		ServerKey:  c.CoordinatorKey,
 		HTTPClient: c.edhttpClient,
@@ -73,6 +73,9 @@ func (c *Client) newDialingRound(conn typesocket.Conn, v coordinator.NewRound) {
 		return
 	}
 
+	c.Handler.NewConfig(configs)
+
+	newConfig := configs[0]
 	c.dialingConfig = newConfig
 	c.dialingConfigHash = v.ConfigHash
 
