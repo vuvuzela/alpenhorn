@@ -265,6 +265,8 @@ func (srv *Server) loop() {
 			ConfigHash: configHash,
 		})
 
+		time.Sleep(500 * time.Millisecond)
+
 		// TODO perhaps pkg.NewRound, mixnet.NewRound, hub.Broadcast, etc
 		// should take a Context for better cancelation.
 
