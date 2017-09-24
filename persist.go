@@ -15,6 +15,7 @@ import (
 	"vuvuzela.io/internal/ioutil2"
 )
 
+//easyjson:readable
 type persistedState struct {
 	Username           string
 	LongTermPublicKey  ed25519.PublicKey
@@ -36,6 +37,7 @@ type persistedState struct {
 
 // persistedFriend is the persisted representation of the Friend type.
 // We use this because Friend.extraData is unexported but must be persisted.
+//easyjson:readable
 type persistedFriend struct {
 	Username    string
 	LongTermKey ed25519.PublicKey

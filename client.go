@@ -23,6 +23,9 @@ import (
 	"vuvuzela.io/alpenhorn/typesocket"
 )
 
+// Use github.com/davidlazar/easyjson:
+//go:generate easyjson -output_filename client_json.go .
+
 // An EventHandler specifies how an application should react to
 // events in the Alpenhorn client.
 type EventHandler interface {

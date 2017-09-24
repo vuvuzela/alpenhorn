@@ -32,6 +32,7 @@ func (c *Client) SendFriendRequest(username string, key ed25519.PublicKey) (*Out
 	return req, err
 }
 
+//easyjson:readable
 type OutgoingFriendRequest struct {
 	Username    string
 	ExpectedKey ed25519.PublicKey
@@ -50,6 +51,7 @@ type OutgoingFriendRequest struct {
 }
 
 // sentFriendRequest is the result of sending an OutgoingFriendRequest.
+//easyjson:readable
 type sentFriendRequest struct {
 	Username     string
 	ExpectedKey  ed25519.PublicKey
@@ -96,6 +98,7 @@ func (c *Client) GetOutgoingFriendRequests() []*OutgoingFriendRequest {
 	return r
 }
 
+//easyjson:readable
 type IncomingFriendRequest struct {
 	Username    string
 	LongTermKey ed25519.PublicKey
