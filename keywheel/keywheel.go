@@ -9,12 +9,14 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"sync"
 )
+
+// Use github.com/davidlazar/easyjson:
+//go:generate easyjson .
 
 const version byte = 1
 
@@ -23,40 +25,10 @@ type Wheel struct {
 	secrets map[string]*roundSecret
 }
 
+//easyjson:readable
 type roundSecret struct {
 	Round  uint32
 	Secret *[32]byte
-}
-
-func (rs roundSecret) MarshalJSON() ([]byte, error) {
-	s := struct {
-		Round  uint32
-		Secret string
-	}{
-		Round:  rs.Round,
-		Secret: base64.RawURLEncoding.EncodeToString(rs.Secret[:]),
-	}
-	return json.Marshal(s)
-}
-
-func (rs *roundSecret) UnmarshalJSON(data []byte) error {
-	s := new(struct {
-		Round  uint32
-		Secret string
-	})
-	if err := json.Unmarshal(data, s); err != nil {
-		return err
-	}
-	key, err := base64.RawURLEncoding.DecodeString(s.Secret)
-	if err != nil {
-		return err
-	}
-	rs.Round = s.Round
-	if rs.Secret == nil {
-		rs.Secret = new([32]byte)
-	}
-	copy(rs.Secret[:], key)
-	return nil
 }
 
 func (rs roundSecret) getSecret(round uint32) *[32]byte {

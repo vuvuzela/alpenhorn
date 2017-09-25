@@ -28,12 +28,13 @@ func TestMarshal(t *testing.T) {
 	}
 
 	w2.EraseKeys(100)
+	w2.EraseKeys(101)
 
 	data, _ := w2.MarshalBinary()
 	expected := `{
   "alice": {
-    "Round": 101,
-    "Secret": "nOb18GfmzrUJ0IRAKLvOUwC_6TepAcMxii7_1LX3BJ4"
+    "Round": 102,
+    "Secret": "bzc1exn1snjc7c43szqhmpd8h7c1hgep42ydwpy48ec6zt02ctx0"
   }
 }
 `
