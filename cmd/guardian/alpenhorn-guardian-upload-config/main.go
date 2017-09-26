@@ -19,6 +19,8 @@ import (
 
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edhttp"
+	// Register the convo inner config.
+	_ "vuvuzela.io/vuvuzela/convo"
 )
 
 var configPath = flag.String("config", "", "path to new signed config")
