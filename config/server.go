@@ -115,7 +115,7 @@ func (srv *Server) getConfigsHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	want := req.URL.Query().Get("want")
-	if have == "" {
+	if want == "" {
 		http.Error(w, "no want hash specified in query", http.StatusBadRequest)
 		return
 	}
