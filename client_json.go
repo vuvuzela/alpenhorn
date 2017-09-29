@@ -213,15 +213,6 @@ func easyjsonDecodePersistedStateC2eed687(in *jlexer.Lexer, out *persistedState)
 			} else {
 				out.PKGLoginKey = in.BytesReadable()
 			}
-		case "CoordinatorAddress":
-			out.CoordinatorAddress = string(in.String())
-		case "CoordinatorKey":
-			if in.IsNull() {
-				in.Skip()
-				out.CoordinatorKey = nil
-			} else {
-				out.CoordinatorKey = in.BytesReadable()
-			}
 		case "AddFriendConfig":
 			if in.IsNull() {
 				in.Skip()
@@ -262,17 +253,17 @@ func easyjsonDecodePersistedStateC2eed687(in *jlexer.Lexer, out *persistedState)
 					out.IncomingFriendRequests = (out.IncomingFriendRequests)[:0]
 				}
 				for !in.IsDelim(']') {
-					var v12 *IncomingFriendRequest
+					var v11 *IncomingFriendRequest
 					if in.IsNull() {
 						in.Skip()
-						v12 = nil
+						v11 = nil
 					} else {
-						if v12 == nil {
-							v12 = new(IncomingFriendRequest)
+						if v11 == nil {
+							v11 = new(IncomingFriendRequest)
 						}
-						(*v12).UnmarshalEasyJSON(in)
+						(*v11).UnmarshalEasyJSON(in)
 					}
-					out.IncomingFriendRequests = append(out.IncomingFriendRequests, v12)
+					out.IncomingFriendRequests = append(out.IncomingFriendRequests, v11)
 					in.WantComma()
 				}
 				in.Delim(']')
@@ -293,17 +284,17 @@ func easyjsonDecodePersistedStateC2eed687(in *jlexer.Lexer, out *persistedState)
 					out.OutgoingFriendRequests = (out.OutgoingFriendRequests)[:0]
 				}
 				for !in.IsDelim(']') {
-					var v13 *OutgoingFriendRequest
+					var v12 *OutgoingFriendRequest
 					if in.IsNull() {
 						in.Skip()
-						v13 = nil
+						v12 = nil
 					} else {
-						if v13 == nil {
-							v13 = new(OutgoingFriendRequest)
+						if v12 == nil {
+							v12 = new(OutgoingFriendRequest)
 						}
-						(*v13).UnmarshalEasyJSON(in)
+						(*v12).UnmarshalEasyJSON(in)
 					}
-					out.OutgoingFriendRequests = append(out.OutgoingFriendRequests, v13)
+					out.OutgoingFriendRequests = append(out.OutgoingFriendRequests, v12)
 					in.WantComma()
 				}
 				in.Delim(']')
@@ -324,17 +315,17 @@ func easyjsonDecodePersistedStateC2eed687(in *jlexer.Lexer, out *persistedState)
 					out.SentFriendRequests = (out.SentFriendRequests)[:0]
 				}
 				for !in.IsDelim(']') {
-					var v14 *sentFriendRequest
+					var v13 *sentFriendRequest
 					if in.IsNull() {
 						in.Skip()
-						v14 = nil
+						v13 = nil
 					} else {
-						if v14 == nil {
-							v14 = new(sentFriendRequest)
+						if v13 == nil {
+							v13 = new(sentFriendRequest)
 						}
-						(*v14).UnmarshalEasyJSON(in)
+						(*v13).UnmarshalEasyJSON(in)
 					}
-					out.SentFriendRequests = append(out.SentFriendRequests, v14)
+					out.SentFriendRequests = append(out.SentFriendRequests, v13)
 					in.WantComma()
 				}
 				in.Delim(']')
@@ -352,17 +343,17 @@ func easyjsonDecodePersistedStateC2eed687(in *jlexer.Lexer, out *persistedState)
 				for !in.IsDelim('}') {
 					key := string(in.String())
 					in.WantColon()
-					var v15 *persistedFriend
+					var v14 *persistedFriend
 					if in.IsNull() {
 						in.Skip()
-						v15 = nil
+						v14 = nil
 					} else {
-						if v15 == nil {
-							v15 = new(persistedFriend)
+						if v14 == nil {
+							v14 = new(persistedFriend)
 						}
-						(*v15).UnmarshalEasyJSON(in)
+						(*v14).UnmarshalEasyJSON(in)
 					}
-					(out.Friends)[key] = v15
+					(out.Friends)[key] = v14
 					in.WantComma()
 				}
 				in.Delim('}')
@@ -380,17 +371,17 @@ func easyjsonDecodePersistedStateC2eed687(in *jlexer.Lexer, out *persistedState)
 				for !in.IsDelim('}') {
 					key := string(in.String())
 					in.WantColon()
-					var v16 *pkg.Client
+					var v15 *pkg.Client
 					if in.IsNull() {
 						in.Skip()
-						v16 = nil
+						v15 = nil
 					} else {
-						if v16 == nil {
-							v16 = new(pkg.Client)
+						if v15 == nil {
+							v15 = new(pkg.Client)
 						}
-						easyjsonDecodeClientC2eed687(in, &(*v16))
+						easyjsonDecodeClientC2eed687(in, &(*v15))
 					}
-					(out.Registrations)[key] = v16
+					(out.Registrations)[key] = v15
 					in.WantComma()
 				}
 				in.Delim('}')
@@ -437,18 +428,6 @@ func easyjsonEncodePersistedStateC2eed687(out *jwriter.Writer, in persistedState
 		out.RawByte(',')
 	}
 	first = false
-	out.RawString("\"CoordinatorAddress\":")
-	out.String(string(in.CoordinatorAddress))
-	if !first {
-		out.RawByte(',')
-	}
-	first = false
-	out.RawString("\"CoordinatorKey\":")
-	out.Base32Bytes(in.CoordinatorKey)
-	if !first {
-		out.RawByte(',')
-	}
-	first = false
 	out.RawString("\"AddFriendConfig\":")
 	if in.AddFriendConfig == nil {
 		out.RawString("null")
@@ -474,14 +453,14 @@ func easyjsonEncodePersistedStateC2eed687(out *jwriter.Writer, in persistedState
 		out.RawString("null")
 	} else {
 		out.RawByte('[')
-		for v25, v26 := range in.IncomingFriendRequests {
-			if v25 > 0 {
+		for v22, v23 := range in.IncomingFriendRequests {
+			if v22 > 0 {
 				out.RawByte(',')
 			}
-			if v26 == nil {
+			if v23 == nil {
 				out.RawString("null")
 			} else {
-				(*v26).MarshalEasyJSON(out)
+				(*v23).MarshalEasyJSON(out)
 			}
 		}
 		out.RawByte(']')
@@ -495,14 +474,14 @@ func easyjsonEncodePersistedStateC2eed687(out *jwriter.Writer, in persistedState
 		out.RawString("null")
 	} else {
 		out.RawByte('[')
-		for v27, v28 := range in.OutgoingFriendRequests {
-			if v27 > 0 {
+		for v24, v25 := range in.OutgoingFriendRequests {
+			if v24 > 0 {
 				out.RawByte(',')
 			}
-			if v28 == nil {
+			if v25 == nil {
 				out.RawString("null")
 			} else {
-				(*v28).MarshalEasyJSON(out)
+				(*v25).MarshalEasyJSON(out)
 			}
 		}
 		out.RawByte(']')
@@ -516,14 +495,14 @@ func easyjsonEncodePersistedStateC2eed687(out *jwriter.Writer, in persistedState
 		out.RawString("null")
 	} else {
 		out.RawByte('[')
-		for v29, v30 := range in.SentFriendRequests {
-			if v29 > 0 {
+		for v26, v27 := range in.SentFriendRequests {
+			if v26 > 0 {
 				out.RawByte(',')
 			}
-			if v30 == nil {
+			if v27 == nil {
 				out.RawString("null")
 			} else {
-				(*v30).MarshalEasyJSON(out)
+				(*v27).MarshalEasyJSON(out)
 			}
 		}
 		out.RawByte(']')
@@ -537,18 +516,18 @@ func easyjsonEncodePersistedStateC2eed687(out *jwriter.Writer, in persistedState
 		out.RawString(`null`)
 	} else {
 		out.RawByte('{')
-		v31First := true
-		for v31Name, v31Value := range in.Friends {
-			if !v31First {
+		v28First := true
+		for v28Name, v28Value := range in.Friends {
+			if !v28First {
 				out.RawByte(',')
 			}
-			v31First = false
-			out.String(string(v31Name))
+			v28First = false
+			out.String(string(v28Name))
 			out.RawByte(':')
-			if v31Value == nil {
+			if v28Value == nil {
 				out.RawString("null")
 			} else {
-				(*v31Value).MarshalEasyJSON(out)
+				(*v28Value).MarshalEasyJSON(out)
 			}
 		}
 		out.RawByte('}')
@@ -562,18 +541,18 @@ func easyjsonEncodePersistedStateC2eed687(out *jwriter.Writer, in persistedState
 		out.RawString(`null`)
 	} else {
 		out.RawByte('{')
-		v32First := true
-		for v32Name, v32Value := range in.Registrations {
-			if !v32First {
+		v29First := true
+		for v29Name, v29Value := range in.Registrations {
+			if !v29First {
 				out.RawByte(',')
 			}
-			v32First = false
-			out.String(string(v32Name))
+			v29First = false
+			out.String(string(v29Name))
 			out.RawByte(':')
-			if v32Value == nil {
+			if v29Value == nil {
 				out.RawString("null")
 			} else {
-				easyjsonEncodeClientC2eed687(out, (*v32Value))
+				easyjsonEncodeClientC2eed687(out, (*v29Value))
 			}
 		}
 		out.RawByte('}')
@@ -917,9 +896,9 @@ func easyjsonDecodeIncomingFriendRequestC2eed687(in *jlexer.Lexer, out *Incoming
 					out.Verifiers = (out.Verifiers)[:0]
 				}
 				for !in.IsDelim(']') {
-					var v47 pkg.PublicServerConfig
-					(v47).UnmarshalEasyJSON(in)
-					out.Verifiers = append(out.Verifiers, v47)
+					var v44 pkg.PublicServerConfig
+					(v44).UnmarshalEasyJSON(in)
+					out.Verifiers = append(out.Verifiers, v44)
 					in.WantComma()
 				}
 				in.Delim(']')
@@ -975,11 +954,11 @@ func easyjsonEncodeIncomingFriendRequestC2eed687(out *jwriter.Writer, in Incomin
 		out.RawString("null")
 	} else {
 		out.RawByte('[')
-		for v51, v52 := range in.Verifiers {
-			if v51 > 0 {
+		for v48, v49 := range in.Verifiers {
+			if v48 > 0 {
 				out.RawByte(',')
 			}
-			(v52).MarshalEasyJSON(out)
+			(v49).MarshalEasyJSON(out)
 		}
 		out.RawByte(']')
 	}

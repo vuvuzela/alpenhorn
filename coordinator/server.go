@@ -35,13 +35,14 @@ type Server struct {
 	PrivateKey ed25519.PrivateKey
 	Log        *log.Logger
 
+	ConfigClient *config.Client
+
 	PKGWait      time.Duration
 	MixWait      time.Duration
 	RoundWait    time.Duration
 	NumMailboxes uint32
 
-	PersistPath             string
-	ConfigServerPersistPath string
+	PersistPath string
 
 	mu             sync.Mutex
 	round          uint32
@@ -51,8 +52,7 @@ type Server struct {
 	latestMixRound *MixRound
 	latestPKGRound *PKGRound
 
-	hub          *typesocket.Hub
-	configServer *config.Server
+	hub *typesocket.Hub
 
 	mixnetClient *mixnet.Client
 	pkgClient    *pkg.CoordinatorClient
@@ -122,19 +122,9 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasPrefix(r.URL.Path, "/ws"):
 		srv.hub.ServeHTTP(w, r)
-	case strings.HasPrefix(r.URL.Path, "/config"):
-		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/config")
-		srv.configServer.ServeHTTP(w, r)
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
-}
-
-// CurrentConfig returns the current Alpenhorn configuration for
-// testing/debugging. The result must not be modified.
-func (srv *Server) CurrentConfig() *config.SignedConfig {
-	c, _ := srv.configServer.CurrentConfig()
-	return c
 }
 
 type OnionMsg struct {
@@ -226,7 +216,15 @@ func (srv *Server) prepCDN(cdnServer config.CDNServerConfig, lastMixer mixnet.Pu
 
 func (srv *Server) loop() {
 	for {
-		currentConfig, configHash := srv.configServer.CurrentConfig()
+		currentConfig, err := srv.ConfigClient.CurrentConfig(srv.Service)
+		if err != nil {
+			log.Errorf("failed to fetch current config: %s", err)
+			if !srv.sleep(10 * time.Second) {
+				break
+			}
+			continue
+		}
+		configHash := currentConfig.Hash()
 
 		var mixServers []mixnet.PublicServerConfig
 		var cdnServer config.CDNServerConfig
@@ -296,7 +294,7 @@ func (srv *Server) loop() {
 			}
 		}
 
-		err := srv.prepCDN(cdnServer, mixServers[len(mixServers)-1], srv.Service, round)
+		err = srv.prepCDN(cdnServer, mixServers[len(mixServers)-1], srv.Service, round)
 		if err != nil {
 			logger.Errorf("error preparing CDN for round: %s", err)
 			break

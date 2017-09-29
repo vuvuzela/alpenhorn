@@ -5,37 +5,60 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"time"
 
-	"golang.org/x/crypto/ed25519"
-
-	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/internal/debug"
 )
 
-type Client struct {
-	ConfigURL  string
-	ServerKey  ed25519.PublicKey
-	HTTPClient *edhttp.Client
+var StdClient = &Client{
+	ConfigServerURL: "https://configs.vuvuzela.io",
 }
 
-// FetchAndVerifyConfig fetches and verifies a config chain starting with
-// the have config and ending with the want config. The chain is returned
-// in reverse order so chain[0].Hash() = want and chain[len(chain)-1] = have.
-func (c Client) FetchAndVerifyConfig(have *SignedConfig, want string) ([]*SignedConfig, error) {
-	url := fmt.Sprintf("%s/get?have=%s&want=%s", c.ConfigURL, have.Hash(), want)
-	resp, err := c.HTTPClient.Get(c.ServerKey, url)
+type Client struct {
+	ConfigServerURL string
+}
+
+func (c *Client) CurrentConfig(service string) (*SignedConfig, error) {
+	url := fmt.Sprintf("%s/current?service=%s", c.ConfigServerURL, service)
+	resp, err := http.Get(url)
 	if err != nil {
-		return nil, errors.Wrap(err, "fetching new config")
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("error fetching %q: %s", url, resp.Status)
+		msg, _ := ioutil.ReadAll(resp.Body)
+		return nil, errors.New("Get %q: %s: %q", url, resp.Status, msg)
+	}
+
+	var config *SignedConfig
+	if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
+		return nil, errors.Wrap(err, "unmarshaling config")
+	}
+
+	return config, nil
+}
+
+// FetchAndVerifyChain fetches and verifies a config chain starting with
+// the have config and ending with the want config. The chain is returned
+// in reverse order so chain[0].Hash() = want and chain[len(chain)-1] = have.
+func (c *Client) FetchAndVerifyChain(have *SignedConfig, want string) ([]*SignedConfig, error) {
+	url := fmt.Sprintf("%s/getchain?have=%s&want=%s", c.ConfigServerURL, have.Hash(), want)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := ioutil.ReadAll(resp.Body)
+		return nil, errors.New("Get %q: %s: %q", url, resp.Status, msg)
 	}
 
 	var configs []*SignedConfig
@@ -70,4 +93,26 @@ func (c Client) FetchAndVerifyConfig(have *SignedConfig, want string) ([]*Signed
 	}
 
 	return configs, nil
+}
+
+func (c *Client) SetCurrentConfig(conf *SignedConfig) error {
+	body := new(bytes.Buffer)
+	err := json.NewEncoder(body).Encode(conf)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("%s/new", c.ConfigServerURL)
+	resp, err := http.Post(url, "application/json", body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := ioutil.ReadAll(resp.Body)
+		return errors.New("error setting %q config: %s: %q", conf.Service, resp.Status, msg)
+	}
+
+	return nil
 }

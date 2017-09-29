@@ -8,7 +8,6 @@ package alpenhorn
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -18,6 +17,7 @@ import (
 
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edhttp"
+	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/keywheel"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/alpenhorn/typesocket"
@@ -68,8 +68,7 @@ type Client struct {
 	LongTermPrivateKey ed25519.PrivateKey
 	PKGLoginKey        ed25519.PrivateKey
 
-	CoordinatorAddress string
-	CoordinatorKey     ed25519.PublicKey
+	ConfigClient *config.Client
 
 	Handler EventHandler
 
@@ -186,11 +185,8 @@ func (c *Client) Connect() error {
 		return errors.New("already connected")
 	}
 
-	if c.CoordinatorAddress == "" {
-		return errors.New("no coordinator address")
-	}
-	if len(c.CoordinatorKey) != ed25519.PublicKeySize {
-		return errors.New("no coordinator key")
+	if c.ConfigClient == nil {
+		return errors.New("no config client")
 	}
 	if c.addFriendConfig == nil {
 		return errors.New("no addfriend config")
@@ -221,15 +217,29 @@ func (c *Client) Connect() error {
 	}
 
 	c.addFriendRounds = make(map[uint32]*addFriendRoundState)
-	afwsAddr := fmt.Sprintf("wss://%s/addfriend/ws", c.CoordinatorAddress)
-	addFriendConn, err := typesocket.Dial(afwsAddr, c.CoordinatorKey, c.addFriendMux())
+	c.dialingRounds = make(map[uint32]*dialingRoundState)
+
+	// Fetch the current config to get the coordinator's key and address.
+	addFriendConfig, err := c.ConfigClient.CurrentConfig("AddFriend")
+	if err != nil {
+		return errors.Wrap(err, "fetching addfriend config")
+	}
+	addFriendInner := addFriendConfig.Inner.(*config.AddFriendConfig)
+
+	afwsAddr := fmt.Sprintf("wss://%s/addfriend/ws", addFriendInner.Coordinator.Address)
+	addFriendConn, err := typesocket.Dial(afwsAddr, addFriendInner.Coordinator.Key, c.addFriendMux())
 	if err != nil {
 		return err
 	}
 
-	c.dialingRounds = make(map[uint32]*dialingRoundState)
-	dwsAddr := fmt.Sprintf("wss://%s/dialing/ws", c.CoordinatorAddress)
-	dialingConn, err := typesocket.Dial(dwsAddr, c.CoordinatorKey, c.dialingMux())
+	dialingConfig, err := c.ConfigClient.CurrentConfig("Dialing")
+	if err != nil {
+		return errors.Wrap(err, "fetching dialing config")
+	}
+	dialingInner := dialingConfig.Inner.(*config.DialingConfig)
+
+	dwsAddr := fmt.Sprintf("wss://%s/dialing/ws", dialingInner.Coordinator.Address)
+	dialingConn, err := typesocket.Dial(dwsAddr, dialingInner.Coordinator.Key, c.dialingMux())
 	if err != nil {
 		addFriendConn.Close()
 		return err

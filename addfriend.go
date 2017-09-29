@@ -9,7 +9,6 @@ import (
 	"crypto/subtle"
 	"encoding"
 	"encoding/hex"
-	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -81,11 +80,7 @@ func (c *Client) newAddFriendRound(conn typesocket.Conn, v coordinator.NewRound)
 		return
 	}
 
-	configs, err := config.Client{
-		ConfigURL:  fmt.Sprintf("https://%s/addfriend/config", c.CoordinatorAddress),
-		ServerKey:  c.CoordinatorKey,
-		HTTPClient: c.edhttpClient,
-	}.FetchAndVerifyConfig(c.addFriendConfig, v.ConfigHash)
+	configs, err := c.ConfigClient.FetchAndVerifyChain(c.addFriendConfig, v.ConfigHash)
 	if err != nil {
 		c.Handler.Error(errors.Wrap(err, "fetching addfriend config"))
 		return
@@ -109,6 +104,8 @@ func (c *Client) newAddFriendRound(conn typesocket.Conn, v coordinator.NewRound)
 func (c *Client) loadAddFriendConfig(newConfig *config.SignedConfig) *config.AddFriendConfig {
 	c.addFriendConfig = newConfig
 	c.addFriendConfigHash = newConfig.Hash()
+
+	// TODO do the right thing if the coordinator changes.
 
 	if c.registrations == nil {
 		c.registrations = make(map[string]*pkg.Client)

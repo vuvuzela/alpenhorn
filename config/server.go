@@ -15,18 +15,22 @@ import (
 type Server struct {
 	persistPath string
 
-	mu                sync.Mutex
-	allConfigs        map[string]*SignedConfig
-	currentConfigHash string
+	mu         sync.Mutex
+	allConfigs map[string]*SignedConfig
+
+	// currentConfig is a map from service name to current config hash.
+	currentConfig map[string]string
 }
 
 func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/get") {
-		srv.getConfigsHandler(w, r)
+	if strings.HasPrefix(r.URL.Path, "/getchain") {
+		srv.getChainHandler(w, r)
+	} else if strings.HasPrefix(r.URL.Path, "/current") {
+		srv.getCurrentHandler(w, r)
 	} else if strings.HasPrefix(r.URL.Path, "/new") {
 		srv.newConfigHandler(w, r)
-	} else if strings.HasPrefix(r.URL.Path, "/current") {
-		srv.getCurrentHashHandler(w, r)
+	} else if r.URL.Path == "/" {
+		w.Write([]byte("Alpenhorn config server."))
 	} else {
 		http.Error(w, "not found", http.StatusNotFound)
 	}
@@ -44,26 +48,29 @@ func (srv *Server) newConfigHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	service := nextConfig.Service
+
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 
-	if nextConfig.PrevConfigHash != srv.currentConfigHash {
+	prevHash, ok := srv.currentConfig[service]
+	if !ok {
 		http.Error(w,
-			fmt.Sprintf("prev config hash does not match current config hash: got %q want %q", nextConfig.PrevConfigHash, srv.currentConfigHash),
+			fmt.Sprintf("unknown service type: %q", service),
 			http.StatusBadRequest,
 		)
 		return
 	}
 
-	prevConfig := srv.allConfigs[srv.currentConfigHash]
-
-	if nextConfig.Service != prevConfig.Service {
+	if nextConfig.PrevConfigHash != prevHash {
 		http.Error(w,
-			fmt.Sprintf("invalid service type: got %q, want %q", nextConfig.Service, prevConfig.Service),
+			fmt.Sprintf("prev config hash does not match current config hash: got %q want %q", nextConfig.PrevConfigHash, prevHash),
 			http.StatusBadRequest,
 		)
 		return
 	}
+
+	prevConfig := srv.allConfigs[prevHash]
 
 	if !nextConfig.Created.After(prevConfig.Created) {
 		http.Error(w,
@@ -78,8 +85,9 @@ func (srv *Server) newConfigHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	srv.currentConfigHash = nextConfig.Hash()
-	srv.allConfigs[srv.currentConfigHash] = nextConfig
+	nextHash := nextConfig.Hash()
+	srv.currentConfig[service] = nextHash
+	srv.allConfigs[nextHash] = nextConfig
 
 	if err := srv.persistLocked(); err != nil {
 		http.Error(w, fmt.Sprintf("error persisting state: %s", err), http.StatusInternalServerError)
@@ -89,24 +97,52 @@ func (srv *Server) newConfigHandler(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte("updated config"))
 }
 
+func (srv *Server) SetCurrentConfig(config *SignedConfig) error {
+	if err := config.Validate(); err != nil {
+		return err
+	}
+
+	srv.mu.Lock()
+	defer srv.mu.Unlock()
+
+	hash := config.Hash()
+	srv.allConfigs[hash] = config
+	srv.currentConfig[config.Service] = hash
+
+	return srv.persistLocked()
+}
+
 // CurrentConfig returns the server's current config and its hash.
 // The result must not be modified.
-func (srv *Server) CurrentConfig() (*SignedConfig, string) {
+func (srv *Server) CurrentConfig(service string) (*SignedConfig, string) {
 	srv.mu.Lock()
-	hash := srv.currentConfigHash
+	hash := srv.currentConfig[service]
 	config := srv.allConfigs[hash]
 	srv.mu.Unlock()
 	return config, hash
 }
 
-func (srv *Server) getCurrentHashHandler(w http.ResponseWriter, req *http.Request) {
+func (srv *Server) getCurrentHandler(w http.ResponseWriter, req *http.Request) {
+	service := req.URL.Query().Get("service")
+	if service == "" {
+		http.Error(w, "no service specified in query", http.StatusBadRequest)
+		return
+	}
+
 	srv.mu.Lock()
-	hash := srv.currentConfigHash
+	hash, ok := srv.currentConfig[service]
+	conf := srv.allConfigs[hash]
 	srv.mu.Unlock()
-	w.Write([]byte(hash))
+
+	if !ok {
+		http.Error(w, fmt.Sprintf("service not found: %q", service), http.StatusBadRequest)
+		return
+	}
+
+	json.NewEncoder(w).Encode(conf)
 }
 
-func (srv *Server) getConfigsHandler(w http.ResponseWriter, req *http.Request) {
+func (srv *Server) getChainHandler(w http.ResponseWriter, req *http.Request) {
 	have := req.URL.Query().Get("have")
 	if have == "" {
 		http.Error(w, "no have hash specified in query", http.StatusBadRequest)

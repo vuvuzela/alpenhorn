@@ -26,14 +26,18 @@ import (
 // SignedConfig is an entry in a hash chain of configs.
 //easyjson:nounmarshal,readable
 type SignedConfig struct {
+	// Service is the name of the service this config corresponds to
+	// (e.g., "AddFriend", "Dialing", or "Convo").
+	Service string
+
 	Created        time.Time
 	Expires        time.Time
 	PrevConfigHash string
 
-	// Service is the protocol the inner config corresponds to
-	// (e.g., "AddFriend", "Dialing", or "Convo").
-	Service string
-	Inner   InnerConfig
+	// Inner is the configuration specific to a service. The type of
+	// the inner config should correspond to the the service name in
+	// the signed config.
+	Inner InnerConfig
 
 	// Guardians is the set of keys that must sign the next config
 	// to replace this config.
@@ -195,15 +199,23 @@ func (c *SignedConfig) UnmarshalJSON(data []byte) error {
 
 //easyjson:readable
 type AddFriendConfig struct {
-	PKGServers []pkg.PublicServerConfig
-	MixServers []mixnet.PublicServerConfig
-	CDNServer  CDNServerConfig
+	Coordinator CoordinatorConfig
+	PKGServers  []pkg.PublicServerConfig
+	MixServers  []mixnet.PublicServerConfig
+	CDNServer   CDNServerConfig
 }
 
 //easyjson:readable
 type DialingConfig struct {
-	MixServers []mixnet.PublicServerConfig
-	CDNServer  CDNServerConfig
+	Coordinator CoordinatorConfig
+	MixServers  []mixnet.PublicServerConfig
+	CDNServer   CDNServerConfig
+}
+
+//easyjson:readable
+type CoordinatorConfig struct {
+	Key     ed25519.PublicKey
+	Address string
 }
 
 //easyjson:readable
@@ -213,6 +225,13 @@ type CDNServerConfig struct {
 }
 
 func (c *AddFriendConfig) Validate() error {
+	if c.Coordinator.Address == "" {
+		return errors.New("empty address for coordinator")
+	}
+	if len(c.Coordinator.Key) != ed25519.PublicKeySize {
+		return errors.New("invalid key for coordinator: %#v", c.Coordinator.Key)
+	}
+
 	for i, mix := range c.MixServers {
 		if len(mix.Key) != ed25519.PublicKeySize {
 			return errors.New("invalid key for mixer %d: %v", i, mix.Key)
@@ -242,6 +261,13 @@ func (c *AddFriendConfig) Validate() error {
 }
 
 func (c *DialingConfig) Validate() error {
+	if c.Coordinator.Address == "" {
+		return errors.New("empty address for coordinator")
+	}
+	if len(c.Coordinator.Key) != ed25519.PublicKeySize {
+		return errors.New("invalid key for coordinator: %#v", c.Coordinator.Key)
+	}
+
 	for i, mix := range c.MixServers {
 		if len(mix.Key) != ed25519.PublicKeySize {
 			return errors.New("invalid key for mixer %d: %v", i, mix.Key)

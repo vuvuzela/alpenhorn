@@ -6,9 +6,8 @@ package config
 
 import (
 	"crypto/rand"
-	"encoding/json"
-	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,9 +16,6 @@ import (
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
 	"golang.org/x/crypto/ed25519"
-
-	"vuvuzela.io/alpenhorn/edhttp"
-	"vuvuzela.io/alpenhorn/edtls"
 )
 
 func TestServer(t *testing.T) {
@@ -38,9 +34,14 @@ func TestServer(t *testing.T) {
 
 	startingConfig := &SignedConfig{
 		Created: time.Now(),
+		Expires: time.Now().Add(24 * time.Hour),
 
 		Service: "AddFriend",
 		Inner: &AddFriendConfig{
+			Coordinator: CoordinatorConfig{
+				Key:     guardian1Public,
+				Address: "localhost:1234",
+			},
 			CDNServer: CDNServerConfig{
 				Address: "localhost:8080",
 				Key:     guardian1Public,
@@ -55,62 +56,64 @@ func TestServer(t *testing.T) {
 		},
 	}
 
-	err = CreateServerState(persistPath, startingConfig)
+	server, err := CreateServer(persistPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = server.SetCurrentConfig(startingConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	server, err := LoadServer(persistPath)
+	server, err = LoadServer(persistPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if server.currentConfigHash != startingConfig.Hash() {
+	_, currHash := server.CurrentConfig("AddFriend")
+	if currHash != startingConfig.Hash() {
 		t.Fatal("wrong current config hash")
 	}
 
-	coordinatorPublic, coordinatorPrivate, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		panic(err)
-	}
-	listener, err := edtls.Listen("tcp", "localhost:0", coordinatorPrivate)
+	listener, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	go func() {
 		err := http.Serve(listener, server)
 		if err != http.ErrServerClosed {
 			t.Fatal(err)
 		}
 	}()
+	client := &Client{
+		ConfigServerURL: "http://" + listener.Addr().String(),
+	}
 
 	newConfig := &SignedConfig{
-		Created:        time.Now(),
+		Created: time.Now(),
+		Expires: time.Now().Add(24 * time.Hour),
+
 		PrevConfigHash: startingConfig.Hash(),
 
 		Service: "AddFriend",
 		Inner: &AddFriendConfig{
+			Coordinator: CoordinatorConfig{
+				Key:     guardian1Public,
+				Address: "localhost:1234",
+			},
 			CDNServer: CDNServerConfig{
 				Address: "localhost:8081",
 				Key:     guardian1Public,
 			},
 		},
 	}
-	client := &edhttp.Client{}
-	baseURL := fmt.Sprintf("https://%s", listener.Addr().String())
 
 	{
 		// Try uploading a new config without the guardian's signature.
-		resp, err := client.PostJSON(coordinatorPublic, baseURL+"/new", newConfig)
-		if err != nil {
-			t.Fatal(err)
+		err := client.SetCurrentConfig(newConfig)
+		if err == nil {
+			t.Fatal("expecting error")
 		}
-		if resp.StatusCode != http.StatusBadRequest {
-			msg, _ := ioutil.ReadAll(resp.Body)
-			t.Fatalf("bad status code: %s: %q", resp.Status, msg)
-		}
-		resp.Body.Close()
 	}
 
 	// Sign the new config and try again.
@@ -119,55 +122,31 @@ func TestServer(t *testing.T) {
 	newConfig.Signatures[gk] = ed25519.Sign(guardian1Private, newConfig.SigningMessage())
 
 	{
-		resp, err := client.PostJSON(coordinatorPublic, baseURL+"/new", newConfig)
+		err := client.SetCurrentConfig(newConfig)
 		if err != nil {
 			t.Fatal(err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			msg, _ := ioutil.ReadAll(resp.Body)
-			t.Fatalf("bad status code: %s: %q", resp.Status, msg)
-		}
-		resp.Body.Close()
-	}
-
-	{
-		resp, err := client.Get(coordinatorPublic, baseURL+"/current")
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("bad status code: %s: %q", resp.Status, body)
-		}
-
-		if string(body) != newConfig.Hash() {
-			t.Fatalf("bad response body: got %q, want %q", string(body), newConfig.Hash())
 		}
 	}
 
 	{
-		url := fmt.Sprintf("%s/get?have=%s&want=%s", baseURL, startingConfig.Hash(), newConfig.Hash())
-		resp, err := client.Get(coordinatorPublic, url)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			msg, _ := ioutil.ReadAll(resp.Body)
-			t.Fatalf("bad status code: %s: %q", resp.Status, msg)
-		}
-		var chain []*SignedConfig
-		err = json.NewDecoder(resp.Body).Decode(&chain)
+		conf, err := client.CurrentConfig("AddFriend")
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		chain = append(chain, startingConfig)
-		err = VerifyConfigChain(chain...)
+		if conf.Hash() != newConfig.Hash() {
+			t.Fatalf("bad response config: got %q, want %q", conf.Hash(), newConfig.Hash())
+		}
+	}
+
+	{
+		chain, err := client.FetchAndVerifyChain(startingConfig, newConfig.Hash())
 		if err != nil {
 			t.Fatal(err)
+		}
+
+		if chain[0].Hash() != newConfig.Hash() {
+			t.Fatal("wrong config in chain")
 		}
 	}
 }

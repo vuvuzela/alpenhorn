@@ -7,7 +7,6 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -30,8 +29,7 @@ import (
 )
 
 var (
-	bootstrapPath = flag.String("bootstrapConfig", "", "path to bootstrap config")
-	doInit        = flag.Bool("init", false, "initialize the coordinator for the first time")
+	doInit = flag.Bool("init", false, "initialize the coordinator for the first time")
 )
 
 type Config struct {
@@ -73,94 +71,27 @@ addFriendMailboxes = {{.AddFriendMailboxes}}
 dialingMailboxes   = {{.DialingMailboxes}}
 `
 
-type BootstrapConfig struct {
-	SignedConfigs SignedConfigs
-}
-
-type SignedConfigs struct {
-	AddFriend *config.SignedConfig
-	Dialing   *config.SignedConfig
-}
-
-var bootstrapConfig *BootstrapConfig
-
-func getBootstrapConfig() *BootstrapConfig {
-	if bootstrapConfig != nil {
-		return bootstrapConfig
-	}
-
-	if *bootstrapPath == "" {
-		fmt.Println("Please specify a bootstrap config with -bootstrapConfig.")
-		os.Exit(1)
-	}
-
-	data, err := ioutil.ReadFile(*bootstrapPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	bootstrapConfig := new(BootstrapConfig)
-	err = json.Unmarshal(data, bootstrapConfig)
-	if err != nil {
-		log.Fatalf("error decoding json from %s: %s", *bootstrapPath, err)
-	}
-
-	return bootstrapConfig
-}
-
 func initService(service string, confHome string) {
 	fmt.Printf("--> Initializing %q service.\n", service)
 	coordinatorPersistPath := filepath.Join(confHome, strings.ToLower(service)+"-coordinator-state")
-	configServerPersistPath := filepath.Join(confHome, strings.ToLower(service)+"-coordinator-configs")
 
 	doCoordinator := overwrite(coordinatorPersistPath)
-	doConfigServer := overwrite(configServerPersistPath)
 
-	if !doCoordinator && !doConfigServer {
+	if !doCoordinator {
 		fmt.Println("Nothing to do.")
 		return
 	}
 
-	if doConfigServer {
-		bootstrap := getBootstrapConfig()
-		var serviceConf *config.SignedConfig
-		switch service {
-		case "AddFriend":
-			serviceConf = bootstrap.SignedConfigs.AddFriend
-		case "Dialing":
-			serviceConf = bootstrap.SignedConfigs.Dialing
-		default:
-			log.Fatalf("unknown service %q", service)
-		}
-
-		if serviceConf == nil {
-			log.Fatalf("no %q config in bootstrap config", service)
-		}
-		if err := serviceConf.Validate(); err != nil {
-			log.Fatalf("invalid signed config for service %q: %s", service, err)
-		}
-
-		err := config.CreateServerState(configServerPersistPath, serviceConf)
-		if err != nil {
-			log.Fatalf("failed to create config server state for service %q: %s", service, err)
-		}
-
-		fmt.Printf("! Wrote config server state: %s\n", configServerPersistPath)
+	server := &coordinator.Server{
+		Service:     service,
+		PersistPath: coordinatorPersistPath,
+	}
+	err := server.Persist()
+	if err != nil {
+		log.Fatalf("failed to create coordinator server state for service %q: %s", service, err)
 	}
 
-	if doCoordinator {
-		server := &coordinator.Server{
-			Service:                 service,
-			PersistPath:             coordinatorPersistPath,
-			ConfigServerPersistPath: configServerPersistPath,
-		}
-		err := server.Persist()
-		if err != nil {
-			log.Fatalf("failed to create coordinator server state for service %q: %s", service, err)
-		}
-
-		fmt.Printf("! Wrote coordinator server state: %s\n", coordinatorPersistPath)
-	}
+	fmt.Printf("! Wrote coordinator server state: %s\n", coordinatorPersistPath)
 }
 
 func initCoordinator() {
@@ -260,14 +191,15 @@ func main() {
 				EntryHandler: alplog.OutputText(log.Stderr),
 			}).WithFields(log.Fields{"service": "AddFriend"}),
 
+			ConfigClient: config.StdClient,
+
 			PKGWait:   conf.PKGWait,
 			MixWait:   conf.MixWait,
 			RoundWait: conf.AddFriendDelay,
 
 			NumMailboxes: conf.AddFriendMailboxes,
 
-			PersistPath:             filepath.Join(confHome, "addfriend-coordinator-state"),
-			ConfigServerPersistPath: filepath.Join(confHome, "addfriend-coordinator-configs"),
+			PersistPath: filepath.Join(confHome, "addfriend-coordinator-state"),
 		}
 
 		err = addFriendServer.LoadPersistedState()
@@ -287,13 +219,14 @@ func main() {
 				EntryHandler: alplog.OutputText(log.Stderr),
 			}).WithFields(log.Fields{"service": "Dialing"}),
 
+			ConfigClient: config.StdClient,
+
 			MixWait:   conf.MixWait,
 			RoundWait: conf.DialingDelay,
 
 			NumMailboxes: conf.DialingMailboxes,
 
-			PersistPath:             filepath.Join(confHome, "dialing-coordinator-state"),
-			ConfigServerPersistPath: filepath.Join(confHome, "dialing-coordinator-configs"),
+			PersistPath: filepath.Join(confHome, "dialing-coordinator-state"),
 		}
 
 		err = dialingServer.LoadPersistedState()

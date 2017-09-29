@@ -14,8 +14,8 @@ import (
 )
 
 type persistedState struct {
-	AllConfigs        map[string]*SignedConfig
-	CurrentConfigHash string
+	AllConfigs    map[string]*SignedConfig
+	CurrentConfig map[string]string
 }
 
 const persistVersion byte = 1
@@ -35,8 +35,8 @@ func writeState(path string, state *persistedState) error {
 
 func (srv *Server) persistLocked() error {
 	state := &persistedState{
-		AllConfigs:        srv.allConfigs,
-		CurrentConfigHash: srv.currentConfigHash,
+		AllConfigs:    srv.allConfigs,
+		CurrentConfig: srv.currentConfig,
 	}
 	return writeState(srv.persistPath, state)
 }
@@ -54,32 +54,28 @@ func LoadServer(persistPath string) (*Server, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "json.Unmarshal")
 	}
-	if len(state.AllConfigs) == 0 {
-		return nil, errors.New("no configs in persisted state")
-	}
-	_, ok := state.AllConfigs[state.CurrentConfigHash]
-	if !ok {
-		return nil, errors.New("current config %q not found in persisted state", state.CurrentConfigHash)
+
+	for service, hash := range state.CurrentConfig {
+		_, ok := state.AllConfigs[hash]
+		if !ok {
+			return nil, errors.New("current %q config (%q) not found in persisted state", service, hash)
+		}
 	}
 
 	return &Server{
 		persistPath: persistPath,
 
-		allConfigs:        state.AllConfigs,
-		currentConfigHash: state.CurrentConfigHash,
+		allConfigs:    state.AllConfigs,
+		currentConfig: state.CurrentConfig,
 	}, nil
 }
 
-func CreateServerState(persistPath string, startingConfig *SignedConfig) error {
-	if err := startingConfig.Validate(); err != nil {
-		return err
+func CreateServer(persistPath string) (*Server, error) {
+	server := &Server{
+		persistPath:   persistPath,
+		allConfigs:    make(map[string]*SignedConfig),
+		currentConfig: make(map[string]string),
 	}
-
-	hash := startingConfig.Hash()
-	state := &persistedState{
-		AllConfigs:        map[string]*SignedConfig{hash: startingConfig},
-		CurrentConfigHash: hash,
-	}
-
-	return writeState(persistPath, state)
+	err := server.persistLocked()
+	return server, err
 }

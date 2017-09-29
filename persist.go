@@ -22,9 +22,6 @@ type persistedState struct {
 	LongTermPrivateKey ed25519.PrivateKey
 	PKGLoginKey        ed25519.PrivateKey
 
-	CoordinatorAddress string
-	CoordinatorKey     ed25519.PublicKey
-
 	AddFriendConfig *config.SignedConfig
 	DialingConfig   *config.SignedConfig
 
@@ -70,9 +67,6 @@ func (c *Client) loadStateLocked(st *persistedState) {
 	c.LongTermPublicKey = st.LongTermPublicKey
 	c.LongTermPrivateKey = st.LongTermPrivateKey
 	c.PKGLoginKey = st.PKGLoginKey
-
-	c.CoordinatorAddress = st.CoordinatorAddress
-	c.CoordinatorKey = st.CoordinatorKey
 
 	c.addFriendConfig = st.AddFriendConfig
 	c.addFriendConfigHash = st.AddFriendConfig.Hash()
@@ -139,9 +133,6 @@ func (c *Client) persistClient() error {
 		LongTermPublicKey:  c.LongTermPublicKey,
 		LongTermPrivateKey: c.LongTermPrivateKey,
 		PKGLoginKey:        c.PKGLoginKey,
-
-		CoordinatorAddress: c.CoordinatorAddress,
-		CoordinatorKey:     c.CoordinatorKey,
 
 		AddFriendConfig: c.addFriendConfig,
 		DialingConfig:   c.dialingConfig,

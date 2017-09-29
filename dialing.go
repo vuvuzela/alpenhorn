@@ -6,7 +6,6 @@ package alpenhorn
 
 import (
 	"crypto/rand"
-	"fmt"
 	"sync/atomic"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
@@ -63,11 +62,7 @@ func (c *Client) newDialingRound(conn typesocket.Conn, v coordinator.NewRound) {
 		return
 	}
 
-	configs, err := config.Client{
-		ConfigURL:  fmt.Sprintf("https://%s/dialing/config", c.CoordinatorAddress),
-		ServerKey:  c.CoordinatorKey,
-		HTTPClient: c.edhttpClient,
-	}.FetchAndVerifyConfig(c.dialingConfig, v.ConfigHash)
+	configs, err := c.ConfigClient.FetchAndVerifyChain(c.dialingConfig, v.ConfigHash)
 	if err != nil {
 		c.Handler.Error(errors.Wrap(err, "fetching dialing config"))
 		return

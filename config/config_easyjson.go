@@ -218,6 +218,12 @@ func easyjsonEncodeSignedConfig6615c02e(out *jwriter.Writer, in SignedConfig) {
 		out.RawByte(',')
 	}
 	first = false
+	out.RawString("\"Service\":")
+	out.String(string(in.Service))
+	if !first {
+		out.RawByte(',')
+	}
+	first = false
 	out.RawString("\"Created\":")
 	out.Raw((in.Created).MarshalJSON())
 	if !first {
@@ -232,12 +238,6 @@ func easyjsonEncodeSignedConfig6615c02e(out *jwriter.Writer, in SignedConfig) {
 	first = false
 	out.RawString("\"PrevConfigHash\":")
 	out.String(string(in.PrevConfigHash))
-	if !first {
-		out.RawByte(',')
-	}
-	first = false
-	out.RawString("\"Service\":")
-	out.String(string(in.Service))
 	if !first {
 		out.RawByte(',')
 	}
@@ -401,6 +401,8 @@ func easyjsonDecodeDialingConfig6615c02e(in *jlexer.Lexer, out *DialingConfig) {
 			continue
 		}
 		switch key {
+		case "Coordinator":
+			(out.Coordinator).UnmarshalEasyJSON(in)
 		case "MixServers":
 			if in.IsNull() {
 				in.Skip()
@@ -440,6 +442,12 @@ func easyjsonEncodeDialingConfig6615c02e(out *jwriter.Writer, in DialingConfig) 
 	out.RawByte('{')
 	first := true
 	_ = first
+	if !first {
+		out.RawByte(',')
+	}
+	first = false
+	out.RawString("\"Coordinator\":")
+	(in.Coordinator).MarshalEasyJSON(out)
 	if !first {
 		out.RawByte(',')
 	}
@@ -488,6 +496,86 @@ func (v *DialingConfig) UnmarshalJSON(data []byte) error {
 // UnmarshalEasyJSON supports easyjson.Unmarshaler interface
 func (v *DialingConfig) UnmarshalEasyJSON(l *jlexer.Lexer) {
 	easyjsonDecodeDialingConfig6615c02e(l, v)
+}
+func easyjsonDecodeCoordinatorConfig6615c02e(in *jlexer.Lexer, out *CoordinatorConfig) {
+	isTopLevel := in.IsStart()
+	if in.IsNull() {
+		if isTopLevel {
+			in.Consumed()
+		}
+		in.Skip()
+		return
+	}
+	in.Delim('{')
+	for !in.IsDelim('}') {
+		key := in.UnsafeString()
+		in.WantColon()
+		if in.IsNull() {
+			in.Skip()
+			in.WantComma()
+			continue
+		}
+		switch key {
+		case "Key":
+			if in.IsNull() {
+				in.Skip()
+				out.Key = nil
+			} else {
+				out.Key = in.BytesReadable()
+			}
+		case "Address":
+			out.Address = string(in.String())
+		default:
+			in.SkipRecursive()
+		}
+		in.WantComma()
+	}
+	in.Delim('}')
+	if isTopLevel {
+		in.Consumed()
+	}
+}
+func easyjsonEncodeCoordinatorConfig6615c02e(out *jwriter.Writer, in CoordinatorConfig) {
+	out.RawByte('{')
+	first := true
+	_ = first
+	if !first {
+		out.RawByte(',')
+	}
+	first = false
+	out.RawString("\"Key\":")
+	out.Base32Bytes(in.Key)
+	if !first {
+		out.RawByte(',')
+	}
+	first = false
+	out.RawString("\"Address\":")
+	out.String(string(in.Address))
+	out.RawByte('}')
+}
+
+// MarshalJSON supports json.Marshaler interface
+func (v CoordinatorConfig) MarshalJSON() ([]byte, error) {
+	w := jwriter.Writer{}
+	easyjsonEncodeCoordinatorConfig6615c02e(&w, v)
+	return w.Buffer.BuildBytes(), w.Error
+}
+
+// MarshalEasyJSON supports easyjson.Marshaler interface
+func (v CoordinatorConfig) MarshalEasyJSON(w *jwriter.Writer) {
+	easyjsonEncodeCoordinatorConfig6615c02e(w, v)
+}
+
+// UnmarshalJSON supports json.Unmarshaler interface
+func (v *CoordinatorConfig) UnmarshalJSON(data []byte) error {
+	r := jlexer.Lexer{Data: data}
+	easyjsonDecodeCoordinatorConfig6615c02e(&r, v)
+	return r.Error()
+}
+
+// UnmarshalEasyJSON supports easyjson.Unmarshaler interface
+func (v *CoordinatorConfig) UnmarshalEasyJSON(l *jlexer.Lexer) {
+	easyjsonDecodeCoordinatorConfig6615c02e(l, v)
 }
 func easyjsonDecodeCDNServerConfig6615c02e(in *jlexer.Lexer, out *CDNServerConfig) {
 	isTopLevel := in.IsStart()
@@ -588,6 +676,8 @@ func easyjsonDecodeAddFriendConfig6615c02e(in *jlexer.Lexer, out *AddFriendConfi
 			continue
 		}
 		switch key {
+		case "Coordinator":
+			(out.Coordinator).UnmarshalEasyJSON(in)
 		case "PKGServers":
 			if in.IsNull() {
 				in.Skip()
@@ -604,9 +694,9 @@ func easyjsonDecodeAddFriendConfig6615c02e(in *jlexer.Lexer, out *AddFriendConfi
 					out.PKGServers = (out.PKGServers)[:0]
 				}
 				for !in.IsDelim(']') {
-					var v23 pkg.PublicServerConfig
-					(v23).UnmarshalEasyJSON(in)
-					out.PKGServers = append(out.PKGServers, v23)
+					var v26 pkg.PublicServerConfig
+					(v26).UnmarshalEasyJSON(in)
+					out.PKGServers = append(out.PKGServers, v26)
 					in.WantComma()
 				}
 				in.Delim(']')
@@ -627,9 +717,9 @@ func easyjsonDecodeAddFriendConfig6615c02e(in *jlexer.Lexer, out *AddFriendConfi
 					out.MixServers = (out.MixServers)[:0]
 				}
 				for !in.IsDelim(']') {
-					var v24 mixnet.PublicServerConfig
-					(v24).UnmarshalEasyJSON(in)
-					out.MixServers = append(out.MixServers, v24)
+					var v27 mixnet.PublicServerConfig
+					(v27).UnmarshalEasyJSON(in)
+					out.MixServers = append(out.MixServers, v27)
 					in.WantComma()
 				}
 				in.Delim(']')
@@ -654,16 +744,22 @@ func easyjsonEncodeAddFriendConfig6615c02e(out *jwriter.Writer, in AddFriendConf
 		out.RawByte(',')
 	}
 	first = false
+	out.RawString("\"Coordinator\":")
+	(in.Coordinator).MarshalEasyJSON(out)
+	if !first {
+		out.RawByte(',')
+	}
+	first = false
 	out.RawString("\"PKGServers\":")
 	if in.PKGServers == nil && (out.Flags&jwriter.NilSliceAsEmpty) == 0 {
 		out.RawString("null")
 	} else {
 		out.RawByte('[')
-		for v25, v26 := range in.PKGServers {
-			if v25 > 0 {
+		for v28, v29 := range in.PKGServers {
+			if v28 > 0 {
 				out.RawByte(',')
 			}
-			(v26).MarshalEasyJSON(out)
+			(v29).MarshalEasyJSON(out)
 		}
 		out.RawByte(']')
 	}
@@ -676,11 +772,11 @@ func easyjsonEncodeAddFriendConfig6615c02e(out *jwriter.Writer, in AddFriendConf
 		out.RawString("null")
 	} else {
 		out.RawByte('[')
-		for v27, v28 := range in.MixServers {
-			if v27 > 0 {
+		for v30, v31 := range in.MixServers {
+			if v30 > 0 {
 				out.RawByte(',')
 			}
-			(v28).MarshalEasyJSON(out)
+			(v31).MarshalEasyJSON(out)
 		}
 		out.RawByte(']')
 	}
