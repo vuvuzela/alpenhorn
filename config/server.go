@@ -7,7 +7,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -36,7 +35,6 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (srv *Server) newConfigHandler(w http.ResponseWriter, req *http.Request) {
 	nextConfig := new(SignedConfig)
 	if err := json.NewDecoder(req.Body).Decode(nextConfig); err != nil {
-		log.Fatal(err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
