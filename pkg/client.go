@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"sync"
 
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/box"
@@ -28,8 +27,6 @@ import (
 // ownership of the username, unless the PKG server is running in
 // first-come-first-serve mode.
 type Client struct {
-	PublicServerConfig PublicServerConfig
-
 	// Username is identity in Identity-Based Encryption.
 	Username string
 
@@ -37,17 +34,15 @@ type Client struct {
 	LoginKey ed25519.PrivateKey
 
 	// UserLongTermKey is the user's long-term signing key. The
-	// PKG server attests to this key during extraction. JSON
-	// ignores this field since it does not need to be persisted.
-	UserLongTermKey ed25519.PublicKey `json:"-"`
+	// PKG server attests to this key during extraction.
+	UserLongTermKey ed25519.PublicKey
 
-	once       sync.Once
-	httpClient *edhttp.Client
+	HTTPClient *edhttp.Client
 }
 
 // Register attempts to register the client's username and login key
 // with the PKG server. It only needs to be called once per PKG server.
-func (c *Client) Register() error {
+func (c *Client) Register(server PublicServerConfig) error {
 	loginPublicKey := c.LoginKey.Public()
 	args := &registerArgs{
 		Username: c.Username,
@@ -55,7 +50,7 @@ func (c *Client) Register() error {
 	}
 
 	var reply string
-	err := c.do("register", args, &reply)
+	err := c.do(server, "register", args, &reply)
 	if err != nil {
 		return err
 	}
@@ -64,7 +59,7 @@ func (c *Client) Register() error {
 
 // Verify is used to verify ownership of a username (email address)
 // when the PKG is not in first-come-first-serve mode.
-func (c *Client) Verify(token []byte) error {
+func (c *Client) Verify(server PublicServerConfig, token []byte) error {
 	args := &verifyArgs{
 		Username: c.Username,
 		Token:    token,
@@ -72,23 +67,23 @@ func (c *Client) Verify(token []byte) error {
 	args.Sign(c.LoginKey)
 
 	var reply string
-	err := c.do("verify", args, &reply)
+	err := c.do(server, "verify", args, &reply)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (c *Client) CheckStatus() error {
+func (c *Client) CheckStatus(server PublicServerConfig) error {
 	args := &statusArgs{
 		Username:         c.Username,
-		ServerSigningKey: c.PublicServerConfig.Key,
+		ServerSigningKey: server.Key,
 	}
 	rand.Read(args.Message[:])
 	args.Signature = ed25519.Sign(c.LoginKey, args.msg())
 
 	var reply statusReply
-	err := c.do("status", args, &reply)
+	err := c.do(server, "status", args, &reply)
 	if err != nil {
 		return err
 	}
@@ -101,7 +96,7 @@ type ExtractResult struct {
 }
 
 // Extract obtains the user's IBE private key for the given round from the PKG.
-func (c *Client) Extract(round uint32) (*ExtractResult, error) {
+func (c *Client) Extract(server PublicServerConfig, round uint32) (*ExtractResult, error) {
 	myPub, myPriv, err := box.GenerateKey(rand.Reader)
 	if err != nil {
 		panic("box.GenerateKey: " + err.Error())
@@ -112,12 +107,12 @@ func (c *Client) Extract(round uint32) (*ExtractResult, error) {
 		Username:         c.Username,
 		ReturnKey:        myPub,
 		UserLongTermKey:  c.UserLongTermKey,
-		ServerSigningKey: c.PublicServerConfig.Key,
+		ServerSigningKey: server.Key,
 	}
 	args.Sign(c.LoginKey)
 
 	reply := new(extractReply)
-	err = c.do("extract", args, reply)
+	err = c.do(server, "extract", args, reply)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +126,7 @@ func (c *Client) Extract(round uint32) (*ExtractResult, error) {
 	if l := len(reply.EncryptedPrivateKey); l < 32 {
 		return nil, errors.New("unexpectedly short ciphertext (%d bytes)", l)
 	}
-	if !reply.Verify(c.PublicServerConfig.Key) {
+	if !reply.Verify(server.Key) {
 		return nil, errors.New("invalid signature")
 	}
 	// TODO un-hardcode 64
@@ -158,17 +153,13 @@ func (c *Client) Extract(round uint32) (*ExtractResult, error) {
 	}, nil
 }
 
-func (c *Client) do(path string, args, reply interface{}) error {
-	c.once.Do(func() {
-		c.httpClient = &edhttp.Client{}
-	})
-
+func (c *Client) do(server PublicServerConfig, path string, args, reply interface{}) error {
 	req := &pkgRequest{
-		PublicServerConfig: c.PublicServerConfig,
+		PublicServerConfig: server,
 		Path:               path,
 		Args:               args,
 		Reply:              reply,
-		Client:             c.httpClient,
+		Client:             c.HTTPClient,
 		TweakRequest: func(req *http.Request) {
 			req.Close = true
 		},

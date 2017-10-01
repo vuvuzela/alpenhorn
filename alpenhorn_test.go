@@ -107,7 +107,7 @@ func (u *universe) newUser(username string) *Client {
 	}
 
 	for _, pkgServer := range u.PKGs {
-		err := client.Register(pkgServer.Address, pkgServer.Key)
+		err := client.Register(pkgServer.PublicServerConfig)
 		if err != nil {
 			log.Fatalf("client.Register: %s", err)
 		}

@@ -107,42 +107,29 @@ func (c *Client) loadAddFriendConfig(newConfig *config.SignedConfig) *config.Add
 
 	// TODO do the right thing if the coordinator changes.
 
-	if c.registrations == nil {
-		c.registrations = make(map[string]*pkg.Client)
-	}
-
 	innerConfig := newConfig.Inner.(*config.AddFriendConfig)
 
+	pkgClient := &pkg.Client{
+		Username:        c.Username,
+		LoginKey:        c.PKGLoginKey,
+		UserLongTermKey: c.LongTermPublicKey,
+		HTTPClient:      c.edhttpClient,
+	}
+
 	for _, pkgServer := range innerConfig.PKGServers {
-		id := regid(pkgServer.Key, c.Username)
-		pkgc := c.registrations[id]
-		if pkgc != nil {
-			continue
-		}
-
-		pkgc = &pkg.Client{
-			PublicServerConfig: pkgServer,
-			Username:           c.Username,
-			LoginKey:           c.PKGLoginKey,
-			UserLongTermKey:    c.LongTermPublicKey,
-		}
-
-		err := pkgc.CheckStatus()
+		err := pkgClient.CheckStatus(pkgServer)
 		if err == nil {
-			// This is a new PKG that has copied our registration from another PKG.
-			c.registrations[id] = pkgc
 			continue
 		}
 
 		pkgErr, ok := err.(pkg.Error)
 		if ok && pkgErr.Code == pkg.ErrNotRegistered {
-			err := pkgc.Register()
+			err := pkgClient.Register(pkgServer)
 			if err != nil {
 				c.Handler.Error(errors.Wrap(err, "failed to register with PKG %s", pkgServer.Address))
 				continue
 			}
 			log.Infof("Registered %q with new PKG %s", c.Username, pkgServer.Address)
-			c.registrations[id] = pkgc
 		} else {
 			c.Handler.Error(errors.Wrap(err, "failed to check account status with PKG %s", pkgServer.Address))
 		}
@@ -188,26 +175,20 @@ func (c *Client) extractPKGKeys(conn typesocket.Conn, v coordinator.PKGRound) {
 
 	id := pkg.ValidUsernameToIdentity(c.Username)
 
+	pkgClient := &pkg.Client{
+		Username:        c.Username,
+		LoginKey:        c.PKGLoginKey,
+		UserLongTermKey: c.LongTermPublicKey,
+		HTTPClient:      c.edhttpClient,
+	}
+
 	for i, pkgServer := range st.Config.PKGServers {
-		c.mu.Lock()
-		pkgc := c.registrations[regid(pkgServer.Key, c.Username)]
-		c.mu.Unlock()
-
-		if pkgc == nil {
-			// TODO we need a way to retry extraction for these kinds of errors.
-			c.Handler.Error(errors.New("no registration for PKG %s", pkgServer.Address))
-			return
-		}
-
-		// TODO short-term hack until we rewrite the PKG client
-		pkgc.UserLongTermKey = c.LongTermPublicKey
-
-		extractResult, err := pkgc.Extract(v.Round)
+		extractResult, err := pkgClient.Extract(pkgServer, v.Round)
 		if err != nil {
-			c.Handler.Error(errors.Wrap(err, "round %d: error extracting private key from %s", v.Round, pkgc.PublicServerConfig.Address))
+			c.Handler.Error(errors.Wrap(err, "round %d: error extracting private key from %s", v.Round, pkgServer.Address))
 			return
 		}
-		hexkey := hex.EncodeToString(pkgc.PublicServerConfig.Key)
+		hexkey := hex.EncodeToString(pkgServer.Key)
 		st.ServerMasterKeys[i] = v.PKGSettings[hexkey].MasterPublicKey
 		st.ServerBLSKeys[i] = v.PKGSettings[hexkey].BLSPublicKey
 		st.PrivateKeys[i] = extractResult.PrivateKey
@@ -218,7 +199,7 @@ func (c *Client) extractPKGKeys(conn typesocket.Conn, v coordinator.PKGRound) {
 			UserLongTermKey: c.LongTermPublicKey,
 		}
 		if !bls.Verify(st.ServerBLSKeys[i:i+1], [][]byte{attestation.Marshal()}, extractResult.IdentitySig) {
-			log.Errorf("pkg %s gave us an invalid identity signature", pkgc.PublicServerConfig.Address)
+			log.Errorf("pkg %s gave us an invalid identity signature", pkgServer.Address)
 			return
 		}
 		st.IdentitySigs[i] = extractResult.IdentitySig

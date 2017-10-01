@@ -11,7 +11,6 @@ import (
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/config"
-	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/internal/ioutil2"
 )
 
@@ -29,7 +28,6 @@ type persistedState struct {
 	OutgoingFriendRequests []*OutgoingFriendRequest
 	SentFriendRequests     []*sentFriendRequest
 	Friends                map[string]*persistedFriend
-	Registrations          map[string]*pkg.Client
 }
 
 // persistedFriend is the persisted representation of the Friend type.
@@ -97,8 +95,6 @@ func (c *Client) loadStateLocked(st *persistedState) {
 			client:      c,
 		}
 	}
-
-	c.registrations = st.Registrations
 }
 
 // Persist writes the client's state to disk. The client persists
@@ -141,8 +137,7 @@ func (c *Client) persistClient() error {
 		OutgoingFriendRequests: c.outgoingFriendRequests,
 		SentFriendRequests:     c.sentFriendRequests,
 
-		Friends:       make(map[string]*persistedFriend, len(c.friends)),
-		Registrations: c.registrations,
+		Friends: make(map[string]*persistedFriend, len(c.friends)),
 	}
 
 	for username, friend := range c.friends {

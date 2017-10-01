@@ -358,34 +358,6 @@ func easyjsonDecodePersistedStateC2eed687(in *jlexer.Lexer, out *persistedState)
 				}
 				in.Delim('}')
 			}
-		case "Registrations":
-			if in.IsNull() {
-				in.Skip()
-			} else {
-				in.Delim('{')
-				if !in.IsDelim('}') {
-					out.Registrations = make(map[string]*pkg.Client)
-				} else {
-					out.Registrations = nil
-				}
-				for !in.IsDelim('}') {
-					key := string(in.String())
-					in.WantColon()
-					var v15 *pkg.Client
-					if in.IsNull() {
-						in.Skip()
-						v15 = nil
-					} else {
-						if v15 == nil {
-							v15 = new(pkg.Client)
-						}
-						easyjsonDecodeClientC2eed687(in, &(*v15))
-					}
-					(out.Registrations)[key] = v15
-					in.WantComma()
-				}
-				in.Delim('}')
-			}
 		default:
 			in.SkipRecursive()
 		}
@@ -453,14 +425,14 @@ func easyjsonEncodePersistedStateC2eed687(out *jwriter.Writer, in persistedState
 		out.RawString("null")
 	} else {
 		out.RawByte('[')
-		for v22, v23 := range in.IncomingFriendRequests {
-			if v22 > 0 {
+		for v21, v22 := range in.IncomingFriendRequests {
+			if v21 > 0 {
 				out.RawByte(',')
 			}
-			if v23 == nil {
+			if v22 == nil {
 				out.RawString("null")
 			} else {
-				(*v23).MarshalEasyJSON(out)
+				(*v22).MarshalEasyJSON(out)
 			}
 		}
 		out.RawByte(']')
@@ -474,14 +446,14 @@ func easyjsonEncodePersistedStateC2eed687(out *jwriter.Writer, in persistedState
 		out.RawString("null")
 	} else {
 		out.RawByte('[')
-		for v24, v25 := range in.OutgoingFriendRequests {
-			if v24 > 0 {
+		for v23, v24 := range in.OutgoingFriendRequests {
+			if v23 > 0 {
 				out.RawByte(',')
 			}
-			if v25 == nil {
+			if v24 == nil {
 				out.RawString("null")
 			} else {
-				(*v25).MarshalEasyJSON(out)
+				(*v24).MarshalEasyJSON(out)
 			}
 		}
 		out.RawByte(']')
@@ -495,14 +467,14 @@ func easyjsonEncodePersistedStateC2eed687(out *jwriter.Writer, in persistedState
 		out.RawString("null")
 	} else {
 		out.RawByte('[')
-		for v26, v27 := range in.SentFriendRequests {
-			if v26 > 0 {
+		for v25, v26 := range in.SentFriendRequests {
+			if v25 > 0 {
 				out.RawByte(',')
 			}
-			if v27 == nil {
+			if v26 == nil {
 				out.RawString("null")
 			} else {
-				(*v27).MarshalEasyJSON(out)
+				(*v26).MarshalEasyJSON(out)
 			}
 		}
 		out.RawByte(']')
@@ -516,43 +488,18 @@ func easyjsonEncodePersistedStateC2eed687(out *jwriter.Writer, in persistedState
 		out.RawString(`null`)
 	} else {
 		out.RawByte('{')
-		v28First := true
-		for v28Name, v28Value := range in.Friends {
-			if !v28First {
+		v27First := true
+		for v27Name, v27Value := range in.Friends {
+			if !v27First {
 				out.RawByte(',')
 			}
-			v28First = false
-			out.String(string(v28Name))
+			v27First = false
+			out.String(string(v27Name))
 			out.RawByte(':')
-			if v28Value == nil {
+			if v27Value == nil {
 				out.RawString("null")
 			} else {
-				(*v28Value).MarshalEasyJSON(out)
-			}
-		}
-		out.RawByte('}')
-	}
-	if !first {
-		out.RawByte(',')
-	}
-	first = false
-	out.RawString("\"Registrations\":")
-	if in.Registrations == nil && (out.Flags&jwriter.NilMapAsEmpty) == 0 {
-		out.RawString(`null`)
-	} else {
-		out.RawByte('{')
-		v29First := true
-		for v29Name, v29Value := range in.Registrations {
-			if !v29First {
-				out.RawByte(',')
-			}
-			v29First = false
-			out.String(string(v29Name))
-			out.RawByte(':')
-			if v29Value == nil {
-				out.RawString("null")
-			} else {
-				easyjsonEncodeClientC2eed687(out, (*v29Value))
+				(*v27Value).MarshalEasyJSON(out)
 			}
 		}
 		out.RawByte('}')
@@ -582,70 +529,6 @@ func (v *persistedState) UnmarshalJSON(data []byte) error {
 // UnmarshalEasyJSON supports easyjson.Unmarshaler interface
 func (v *persistedState) UnmarshalEasyJSON(l *jlexer.Lexer) {
 	easyjsonDecodePersistedStateC2eed687(l, v)
-}
-func easyjsonDecodeClientC2eed687(in *jlexer.Lexer, out *pkg.Client) {
-	isTopLevel := in.IsStart()
-	if in.IsNull() {
-		if isTopLevel {
-			in.Consumed()
-		}
-		in.Skip()
-		return
-	}
-	in.Delim('{')
-	for !in.IsDelim('}') {
-		key := in.UnsafeString()
-		in.WantColon()
-		if in.IsNull() {
-			in.Skip()
-			in.WantComma()
-			continue
-		}
-		switch key {
-		case "PublicServerConfig":
-			(out.PublicServerConfig).UnmarshalEasyJSON(in)
-		case "Username":
-			out.Username = string(in.String())
-		case "LoginKey":
-			if in.IsNull() {
-				in.Skip()
-				out.LoginKey = nil
-			} else {
-				out.LoginKey = in.Bytes()
-			}
-		default:
-			in.SkipRecursive()
-		}
-		in.WantComma()
-	}
-	in.Delim('}')
-	if isTopLevel {
-		in.Consumed()
-	}
-}
-func easyjsonEncodeClientC2eed687(out *jwriter.Writer, in pkg.Client) {
-	out.RawByte('{')
-	first := true
-	_ = first
-	if !first {
-		out.RawByte(',')
-	}
-	first = false
-	out.RawString("\"PublicServerConfig\":")
-	(in.PublicServerConfig).MarshalEasyJSON(out)
-	if !first {
-		out.RawByte(',')
-	}
-	first = false
-	out.RawString("\"Username\":")
-	out.String(string(in.Username))
-	if !first {
-		out.RawByte(',')
-	}
-	first = false
-	out.RawString("\"LoginKey\":")
-	out.Base64Bytes(in.LoginKey)
-	out.RawByte('}')
 }
 func easyjsonDecodePersistedFriendC2eed687(in *jlexer.Lexer, out *persistedFriend) {
 	isTopLevel := in.IsStart()
@@ -896,9 +779,9 @@ func easyjsonDecodeIncomingFriendRequestC2eed687(in *jlexer.Lexer, out *Incoming
 					out.Verifiers = (out.Verifiers)[:0]
 				}
 				for !in.IsDelim(']') {
-					var v44 pkg.PublicServerConfig
-					(v44).UnmarshalEasyJSON(in)
-					out.Verifiers = append(out.Verifiers, v44)
+					var v39 pkg.PublicServerConfig
+					(v39).UnmarshalEasyJSON(in)
+					out.Verifiers = append(out.Verifiers, v39)
 					in.WantComma()
 				}
 				in.Delim(']')
@@ -954,11 +837,11 @@ func easyjsonEncodeIncomingFriendRequestC2eed687(out *jwriter.Writer, in Incomin
 		out.RawString("null")
 	} else {
 		out.RawByte('[')
-		for v48, v49 := range in.Verifiers {
-			if v48 > 0 {
+		for v43, v44 := range in.Verifiers {
+			if v43 > 0 {
 				out.RawByte(',')
 			}
-			(v49).MarshalEasyJSON(out)
+			(v44).MarshalEasyJSON(out)
 		}
 		out.RawByte(']')
 	}

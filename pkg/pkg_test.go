@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/ed25519"
 
+	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/internal/mock"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/crypto/ibe"
@@ -51,23 +52,23 @@ func TestSingleClient(t *testing.T) {
 
 	alicePub, alicePriv, _ := ed25519.GenerateKey(rand.Reader)
 	client := &pkg.Client{
-		PublicServerConfig: testpkg.PublicServerConfig,
-		Username:           "alice@example.org",
-		LoginKey:           alicePriv,
-		UserLongTermKey:    alicePub,
+		Username:        "alice@example.org",
+		LoginKey:        alicePriv,
+		UserLongTermKey: alicePub,
+		HTTPClient:      new(edhttp.Client),
 	}
 
-	err := client.Register()
+	err := client.Register(testpkg.PublicServerConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = client.Register()
+	err = client.Register(testpkg.PublicServerConfig)
 	if err.(pkg.Error).Code != pkg.ErrRegistrationInProgress {
 		t.Fatal(err)
 	}
 
-	err = client.Verify([]byte("wrong token"))
+	err = client.Verify(testpkg.PublicServerConfig, []byte("wrong token"))
 	if err.(pkg.Error).Code != pkg.ErrInvalidToken {
 		t.Fatal(err)
 	}
@@ -76,23 +77,23 @@ func TestSingleClient(t *testing.T) {
 
 	_, otherPriv, _ := ed25519.GenerateKey(rand.Reader)
 	client.LoginKey = otherPriv
-	err = client.Verify(email.token)
+	err = client.Verify(testpkg.PublicServerConfig, email.token)
 	if err.(pkg.Error).Code != pkg.ErrInvalidSignature {
 		t.Fatal(err)
 	}
 
 	client.LoginKey = alicePriv
-	err = client.Verify(email.token)
+	err = client.Verify(testpkg.PublicServerConfig, email.token)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = client.Register()
+	err = client.Register(testpkg.PublicServerConfig)
 	if err.(pkg.Error).Code != pkg.ErrAlreadyRegistered {
 		t.Fatal(err)
 	}
 
-	err = client.CheckStatus()
+	err = client.CheckStatus(testpkg.PublicServerConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,11 +109,11 @@ func TestSingleClient(t *testing.T) {
 	}
 	revealReply := pkgSettings[hex.EncodeToString(testpkg.Key)]
 
-	result1, err := client.Extract(42)
+	result1, err := client.Extract(testpkg.PublicServerConfig, 42)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result2, err := client.Extract(42)
+	result2, err := client.Extract(testpkg.PublicServerConfig, 42)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +121,7 @@ func TestSingleClient(t *testing.T) {
 		t.Fatalf("ibe private key differs across calls to extract")
 	}
 
-	_, err = client.Extract(40)
+	_, err = client.Extract(testpkg.PublicServerConfig, 40)
 	if err.(pkg.Error).Code != pkg.ErrRoundNotFound {
 		t.Fatal(err)
 	}
@@ -143,18 +144,18 @@ func TestRegisterFirstComeFirstServe(t *testing.T) {
 
 	alicePub, alicePriv, _ := ed25519.GenerateKey(rand.Reader)
 	client := &pkg.Client{
-		PublicServerConfig: testpkg.PublicServerConfig,
-		Username:           "alice@example.org",
-		LoginKey:           alicePriv,
-		UserLongTermKey:    alicePub,
+		Username:        "alice@example.org",
+		LoginKey:        alicePriv,
+		UserLongTermKey: alicePub,
+		HTTPClient:      new(edhttp.Client),
 	}
 
-	err := client.Register()
+	err := client.Register(testpkg.PublicServerConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = client.Register()
+	err = client.Register(testpkg.PublicServerConfig)
 	if err.(pkg.Error).Code != pkg.ErrAlreadyRegistered {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestRegisterFirstComeFirstServe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = client.Extract(42)
+	_, err = client.Extract(testpkg.PublicServerConfig, 42)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,10 +187,10 @@ func TestManyClients(t *testing.T) {
 		for i := 0; i < usersPerThread; i++ {
 			userPub, userPriv, _ := ed25519.GenerateKey(rand.Reader)
 			clients[thread*usersPerThread+i] = &pkg.Client{
-				PublicServerConfig: testpkg.PublicServerConfig,
-				Username:           fmt.Sprintf("%d@thread%d", i, thread),
-				LoginKey:           userPriv,
-				UserLongTermKey:    userPub,
+				Username:        fmt.Sprintf("%d@thread%d", i, thread),
+				LoginKey:        userPriv,
+				UserLongTermKey: userPub,
+				HTTPClient:      new(edhttp.Client),
 			}
 		}
 	}
@@ -201,7 +202,7 @@ func TestManyClients(t *testing.T) {
 		go func(thread int) {
 			for i := 0; i < usersPerThread; i++ {
 				client := clients[thread*usersPerThread+i]
-				err := client.Register()
+				err := client.Register(testpkg.PublicServerConfig)
 				if err != nil {
 					t.Fatalf("client register: %s", err)
 				}
@@ -227,7 +228,7 @@ func TestManyClients(t *testing.T) {
 		go func(thread int) {
 			for i := 0; i < usersPerThread; i++ {
 				client := clients[thread*usersPerThread+i]
-				reply, err := client.Extract(42)
+				reply, err := client.Extract(testpkg.PublicServerConfig, 42)
 				if err != nil {
 					t.Fatalf("client extract: %s", err)
 				}

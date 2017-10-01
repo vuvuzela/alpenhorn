@@ -6,8 +6,6 @@
 package alpenhorn
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -91,7 +89,7 @@ type Client struct {
 	// when the client connects.
 	wheel keywheel.Wheel
 
-	once         sync.Once
+	initOnce     sync.Once
 	edhttpClient *edhttp.Client
 
 	lastDialingRound uint32 // updated atomically
@@ -102,7 +100,6 @@ type Client struct {
 	addFriendRounds     map[uint32]*addFriendRoundState
 	addFriendConfigHash string
 	addFriendConfig     *config.SignedConfig
-	registrations       map[string]*pkg.Client
 
 	dialingRounds     map[uint32]*dialingRoundState
 	dialingConfigHash string
@@ -119,64 +116,35 @@ type Client struct {
 	dialingConn   typesocket.Conn
 }
 
-func regid(serverKey ed25519.PublicKey, username string) string {
-	h := sha256.Sum256(append(serverKey, []byte(username)...))
-	return hex.EncodeToString(h[:])
+func (c *Client) init() {
+	c.initOnce.Do(func() {
+		c.edhttpClient = new(edhttp.Client)
+	})
 }
 
 // Register registers the username with the given PKG.
-func (c *Client) Register(pkgAddr string, pkgKey ed25519.PublicKey) error {
-	regID := regid(pkgKey, c.Username)
-
-	c.mu.Lock()
-	if c.registrations == nil {
-		c.registrations = make(map[string]*pkg.Client)
-	}
-	_, ok := c.registrations[regID]
-	c.mu.Unlock()
-
-	if ok {
-		// already registered
-		return nil
-	}
+func (c *Client) Register(server pkg.PublicServerConfig) error {
+	c.init()
 
 	pkgc := &pkg.Client{
-		PublicServerConfig: pkg.PublicServerConfig{
-			Key:     pkgKey,
-			Address: pkgAddr,
-		},
 		Username:        c.Username,
 		LoginKey:        c.PKGLoginKey,
 		UserLongTermKey: c.LongTermPublicKey,
+		HTTPClient:      c.edhttpClient,
 	}
-	err := pkgc.Register()
+	err := pkgc.Register(server)
 	if err != nil {
 		return err
 	}
 
-	c.mu.Lock()
-	c.registrations[regID] = pkgc
-	err = c.persistLocked()
-	c.mu.Unlock()
-
 	return err
-}
-
-func (c *Client) getRegistration(username string, serverKey ed25519.PublicKey) *pkg.Client {
-	regID := regid(serverKey, username)
-	c.mu.Lock()
-	reg := c.registrations[regID]
-	c.mu.Unlock()
-	return reg
 }
 
 // Connect connects to the Alpenhorn servers specified in the client's
 // connection settings and starts participating in the add-friend and
 // dialing protocols.
 func (c *Client) Connect() error {
-	c.once.Do(func() {
-		c.edhttpClient = new(edhttp.Client)
-	})
+	c.init()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
