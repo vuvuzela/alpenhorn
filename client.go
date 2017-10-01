@@ -125,8 +125,8 @@ func regid(serverKey ed25519.PublicKey, username string) string {
 }
 
 // Register registers the username with the given PKG.
-func (c *Client) Register(username string, pkgAddr string, pkgKey ed25519.PublicKey) error {
-	regID := regid(pkgKey, username)
+func (c *Client) Register(pkgAddr string, pkgKey ed25519.PublicKey) error {
+	regID := regid(pkgKey, c.Username)
 
 	c.mu.Lock()
 	if c.registrations == nil {
