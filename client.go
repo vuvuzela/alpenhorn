@@ -140,6 +140,33 @@ func (c *Client) Register(server pkg.PublicServerConfig) error {
 	return err
 }
 
+type PKGStatus struct {
+	Server pkg.PublicServerConfig
+	Error  error
+}
+
+func (c *Client) PKGStatus() []PKGStatus {
+	c.init()
+
+	pkgc := &pkg.Client{
+		Username:        c.Username,
+		LoginKey:        c.PKGLoginKey,
+		UserLongTermKey: c.LongTermPublicKey,
+		HTTPClient:      c.edhttpClient,
+	}
+	c.mu.Lock()
+	conf := c.addFriendConfig
+	c.mu.Unlock()
+	addFriendConfig := conf.Inner.(*config.AddFriendConfig)
+
+	statuses := make([]PKGStatus, len(addFriendConfig.PKGServers))
+	for i, pkgServer := range addFriendConfig.PKGServers {
+		statuses[i].Server = pkgServer
+		statuses[i].Error = pkgc.CheckStatus(pkgServer)
+	}
+	return statuses
+}
+
 // Connect connects to the Alpenhorn servers specified in the client's
 // connection settings and starts participating in the add-friend and
 // dialing protocols.
