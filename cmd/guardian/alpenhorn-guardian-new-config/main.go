@@ -16,6 +16,7 @@ import (
 )
 
 var service = flag.String("service", "", "service name")
+var printCurrent = flag.Bool("current", false, "print current config")
 var configServerURL = flag.String("url", "", "url of config server")
 
 func main() {
@@ -41,11 +42,13 @@ func main() {
 	}
 	confHash := conf.Hash()
 
-	valid := conf.Expires.Sub(conf.Created)
-	conf.Created = time.Now()
-	conf.Expires = conf.Created.Add(valid)
-	conf.PrevConfigHash = confHash
-	conf.Signatures = make(map[string][]byte)
+	if !*printCurrent {
+		valid := conf.Expires.Sub(conf.Created)
+		conf.Created = time.Now()
+		conf.Expires = conf.Created.Add(valid)
+		conf.PrevConfigHash = confHash
+		conf.Signatures = make(map[string][]byte)
+	}
 
 	data, err := json.MarshalIndent(conf, "", "  ")
 	if err != nil {
