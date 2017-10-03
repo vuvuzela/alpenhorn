@@ -65,5 +65,5 @@ func main() {
 	msg := config.SigningMessage()
 	sig := ed25519.Sign(privateKey, msg)
 
-	fmt.Printf("Signature: %s\n", base32.EncodeToString(sig))
+	fmt.Printf("%q: %q\n", base32.EncodeToString(publicKey), base32.EncodeToString(sig))
 }
