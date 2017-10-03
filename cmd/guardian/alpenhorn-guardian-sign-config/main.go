@@ -59,7 +59,7 @@ func main() {
 		}
 	}
 	if myPos == -1 {
-		fmt.Printf("! Warning: your key is not in the supplied config's Guardian list!\n")
+		fmt.Fprintf(os.Stderr, "! Warning: your key is not in the supplied config's Guardian list!\n")
 	}
 
 	msg := config.SigningMessage()
