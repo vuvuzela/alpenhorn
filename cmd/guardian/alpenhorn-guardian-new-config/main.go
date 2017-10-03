@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"vuvuzela.io/alpenhorn/config"
+	// Register the convo inner config.
+	_ "vuvuzela.io/vuvuzela/convo"
 )
 
 var service = flag.String("service", "", "service name")
