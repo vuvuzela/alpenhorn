@@ -55,7 +55,7 @@ func (c *Client) addFriendMux() typesocket.Mux {
 }
 
 func (c *Client) addFriendRoundError(conn typesocket.Conn, v coordinator.RoundError) {
-	log.Errorf("addfriend round error: %#v", v)
+	log.WithFields(log.Fields{"round": v.Round}).Errorf("addfriend coordinator sent error: %s", v.Err)
 }
 
 func (c *Client) newAddFriendRound(conn typesocket.Conn, v coordinator.NewRound) {
