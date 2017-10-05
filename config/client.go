@@ -42,6 +42,19 @@ func (c *Client) CurrentConfig(service string) (*SignedConfig, error) {
 		return nil, errors.Wrap(err, "unmarshaling config")
 	}
 
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+	if config.Service != service {
+		return nil, errors.New("received config for wrong service type: want %q, got %q", service, config.Service)
+	}
+	if time.Now().After(config.Expires) {
+		return nil, errors.New("config expired on %s", config.Expires)
+	}
+	if err := config.Verify(); err != nil {
+		return nil, err
+	}
+
 	return config, nil
 }
 

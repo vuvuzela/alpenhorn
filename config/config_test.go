@@ -19,6 +19,100 @@ import (
 	"vuvuzela.io/alpenhorn/pkg"
 )
 
+type trivialInner struct{}
+
+func (x trivialInner) Validate() error { return nil }
+
+func TestVerify(t *testing.T) {
+	gA, gApriv := newGuardian("A")
+
+	conf1 := &SignedConfig{
+		Service:    "Trivial",
+		Created:    time.Now(),
+		Expires:    time.Now().Add(24 * time.Hour),
+		Inner:      trivialInner{},
+		Guardians:  []Guardian{gA},
+		Signatures: make(map[string][]byte),
+	}
+
+	err := conf1.Verify()
+	if err == nil {
+		t.Fatal("expecting Verify to fail")
+	}
+
+	conf1.Signatures[base32.EncodeToString(gA.Key)] = ed25519.Sign(gApriv, conf1.SigningMessage())
+
+	err = conf1.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gB, gBpriv := newGuardian("B")
+
+	conf2 := &SignedConfig{
+		Service:        "Trivial",
+		Created:        time.Now(),
+		Expires:        time.Now().Add(24 * time.Hour),
+		PrevConfigHash: conf1.Hash(),
+		Inner:          trivialInner{},
+		Guardians:      []Guardian{gB},
+		Signatures:     nil,
+	}
+
+	err = VerifyConfigChain(conf2, conf1)
+	if err == nil {
+		t.Fatal("expected VerifyConfigChain to fail")
+	}
+
+	conf2.Signatures = map[string][]byte{
+		base32.EncodeToString(gA.Key): ed25519.Sign(gApriv, conf2.SigningMessage()),
+	}
+	err = VerifyConfigChain(conf2, conf1)
+	if err == nil {
+		t.Fatal("expected VerifyConfigChain to fail")
+	}
+	err = conf2.Verify()
+	if err == nil {
+		t.Fatal("expecting Verify to fail")
+	}
+
+	conf2.Signatures = map[string][]byte{
+		base32.EncodeToString(gB.Key): ed25519.Sign(gBpriv, conf2.SigningMessage()),
+	}
+	err = VerifyConfigChain(conf2, conf1)
+	if err == nil {
+		t.Fatal("expected VerifyConfigChain to fail")
+	}
+	err = conf2.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conf2.Signatures = map[string][]byte{
+		base32.EncodeToString(gA.Key): ed25519.Sign(gApriv, conf2.SigningMessage()),
+		base32.EncodeToString(gB.Key): ed25519.Sign(gBpriv, conf2.SigningMessage()),
+	}
+	err = VerifyConfigChain(conf2, conf1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = conf2.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newGuardian(username string) (Guardian, ed25519.PrivateKey) {
+	guardianPub, guardianPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	return Guardian{
+		Username: username,
+		Key:      guardianPub,
+	}, guardianPriv
+}
+
 func TestMarshalConfig(t *testing.T) {
 	guardianPub, guardianPriv, _ := ed25519.GenerateKey(rand.Reader)
 

@@ -93,8 +93,23 @@ func VerifyConfigChain(configs ...*SignedConfig) error {
 		}
 
 		msg := curr.SigningMessage()
+		verified := make(map[string]bool)
 		for _, guardian := range prev.Guardians {
 			keystr := base32.EncodeToString(guardian.Key)
+			sig, ok := curr.Signatures[keystr]
+			if !ok {
+				return errors.New("config %d: missing signature for key %s: %s", i, guardian.Username, keystr)
+			}
+			if !ed25519.Verify(guardian.Key, msg, sig) {
+				return errors.New("config %d: invalid signature for key %s: %s", i, guardian.Username, keystr)
+			}
+			verified[keystr] = true
+		}
+		for _, guardian := range curr.Guardians {
+			keystr := base32.EncodeToString(guardian.Key)
+			if verified[keystr] {
+				continue
+			}
 			sig, ok := curr.Signatures[keystr]
 			if !ok {
 				return errors.New("config %d: missing signature for key %s: %s", i, guardian.Username, keystr)
@@ -105,6 +120,21 @@ func VerifyConfigChain(configs ...*SignedConfig) error {
 		}
 	}
 
+	return nil
+}
+
+func (c *SignedConfig) Verify() error {
+	msg := c.SigningMessage()
+	for _, guardian := range c.Guardians {
+		keystr := base32.EncodeToString(guardian.Key)
+		sig, ok := c.Signatures[keystr]
+		if !ok {
+			return errors.New("missing signature for key %s: %s", guardian.Username, keystr)
+		}
+		if !ed25519.Verify(guardian.Key, msg, sig) {
+			return errors.New("invalid signature for key %s: %s", guardian.Username, keystr)
+		}
+	}
 	return nil
 }
 
