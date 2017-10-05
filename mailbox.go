@@ -26,7 +26,7 @@ func (c *Client) fetchMailbox(cdnConfig config.CDNServerConfig, baseURL string, 
 
 	resp, err := c.edhttpClient.Get(cdnConfig.Key, u.String())
 	if err != nil {
-		return nil, errors.Wrap(err, "http get mailbox")
+		return nil, err
 	}
 	defer resp.Body.Close()
 
