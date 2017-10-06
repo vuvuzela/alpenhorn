@@ -164,7 +164,7 @@ func (srv *Server) NewRound(ctx context.Context, req *pb.NewRoundRequest) (*pb.N
 
 	public, private, err := box.GenerateKey(cryptoRand.Reader)
 	if err != nil {
-		return nil, errors.New("box.GenerateKey error: %s", err)
+		panic(err)
 	}
 
 	chain := make([]PublicServerConfig, len(req.Chain))
