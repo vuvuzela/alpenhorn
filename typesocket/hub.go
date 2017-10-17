@@ -26,7 +26,7 @@ const (
 	pingPeriod = 20 * time.Second
 
 	// Maximum message size allowed from peer.
-	maxMessageSize = 4096
+	maxMessageSize = 16384
 )
 
 type Hub struct {
