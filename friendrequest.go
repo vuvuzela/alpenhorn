@@ -98,6 +98,24 @@ func (c *Client) GetOutgoingFriendRequests() []*OutgoingFriendRequest {
 	return r
 }
 
+func (c *Client) GetSentFriendRequests() []*OutgoingFriendRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	reqs := make([]*OutgoingFriendRequest, len(c.sentFriendRequests))
+	for i, req := range c.sentFriendRequests {
+		reqs[i] = &OutgoingFriendRequest{
+			Username:     req.Username,
+			ExpectedKey:  req.ExpectedKey,
+			Confirmation: req.Confirmation,
+			DialRound:    req.DialRound,
+
+			client: c,
+		}
+	}
+	return reqs
+}
+
 //easyjson:readable
 type IncomingFriendRequest struct {
 	Username    string
