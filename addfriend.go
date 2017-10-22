@@ -281,6 +281,11 @@ func (c *Client) sendAddFriendOnion(conn typesocket.Conn, v coordinator.MixRound
 			c.mu.Unlock()
 		}
 	}
+
+	// Always persist client to avoid side-channels.
+	if err := c.persistClient(); err != nil {
+		panic(err)
+	}
 }
 
 func (c *Client) nextOutgoingFriendRequest() *OutgoingFriendRequest {
@@ -388,6 +393,11 @@ func (c *Client) scanMailbox(conn typesocket.Conn, v coordinator.MailboxURL) {
 			c.decodeAddFriendMessage(msg, st.Config.PKGServers, st.ServerBLSKeys)
 		}
 	})
+
+	// Always persist client to avoid side-channels.
+	if err := c.persistClient(); err != nil {
+		panic(err)
+	}
 }
 
 func (c *Client) decodeAddFriendMessage(msg []byte, verifiers []pkg.PublicServerConfig, multisigKeys []*bls.PublicKey) {
@@ -477,10 +487,6 @@ func (c *Client) newFriend(in *IncomingFriendRequest, sent *sentFriendRequest) {
 		}
 	}
 	c.sentFriendRequests = newSent
-
-	if err := c.persistLocked(); err != nil {
-		c.Handler.Error(errors.Wrap(err, "persist error"))
-	}
 	c.mu.Unlock()
 
 	c.Handler.ConfirmedFriend(friend)
