@@ -94,6 +94,12 @@ func (f *Friend) UnsafeKeywheelState() (uint32, *[32]byte) {
 	return f.client.wheel.UnsafeGet(f.Username)
 }
 
+// SessionKey returns the shared key at the given round.
+// This should only be used for debugging.
+func (f *Friend) SessionKey(round uint32) *[32]byte {
+	return f.client.wheel.SessionKey(f.Username, round)
+}
+
 // Intents are the dialing intents passed to Call.
 const (
 	IntentTalk = iota
