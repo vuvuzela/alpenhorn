@@ -108,22 +108,21 @@ func (c *Client) Persist() error {
 }
 
 // persistLocked persists the client state and keywheel state, assuming
-// c.mu is locked. The keywheel and client state are always persisted
+// c.mu is locked. The keywheel and client state are usually persisted
 // at the same time to avoid leaking metadata.
 func (c *Client) persistLocked() error {
-	var err error
-	if c.ClientPersistPath != "" {
-		err = c.persistClient()
-	}
-	if c.KeywheelPersistPath != "" {
-		if e := c.persistKeywheel(); err == nil {
-			err = e
-		}
+	err := c.persistClient()
+	if e := c.persistKeywheel(); err == nil {
+		err = e
 	}
 	return err
 }
 
 func (c *Client) persistClient() error {
+	if c.ClientPersistPath == "" {
+		return nil
+	}
+
 	st := &persistedState{
 		Username:           c.Username,
 		LongTermPublicKey:  c.LongTermPublicKey,
@@ -157,6 +156,10 @@ func (c *Client) persistClient() error {
 }
 
 func (c *Client) persistKeywheel() error {
+	if c.KeywheelPersistPath == "" {
+		return nil
+	}
+
 	data, err := c.wheel.MarshalBinary()
 	if err != nil {
 		return err

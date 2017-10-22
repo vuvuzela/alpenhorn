@@ -191,4 +191,7 @@ func (c *Client) scanBloomFilter(conn typesocket.Conn, v coordinator.MailboxURL)
 		}
 	}
 	c.wheel.EraseKeys(v.Round)
+	if err := c.persistKeywheel(); err != nil {
+		panic(err)
+	}
 }
