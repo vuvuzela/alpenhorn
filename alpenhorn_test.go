@@ -64,7 +64,7 @@ func (h *chanHandler) SentFriendRequest(r *OutgoingFriendRequest) {
 func (h *chanHandler) ReceivedFriendRequest(r *IncomingFriendRequest) {
 	h.receivedFriendRequest <- r
 }
-func (h *chanHandler) SentCall(call *OutgoingCall) {
+func (h *chanHandler) SendingCall(call *OutgoingCall) {
 	h.sentCall <- call
 }
 func (h *chanHandler) ReceivedCall(call *IncomingCall) {
@@ -273,8 +273,8 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	friend = <-bob2.Handler.(*chanHandler).confirmedFriend
 	friend.Call(1)
 	outCall = <-bob2.Handler.(*chanHandler).sentCall
-	if outCall.Intent != 1 {
-		t.Fatalf("wrong intent: got %d, want %d", outCall.Intent, 1)
+	if outCall.Intent() != 1 {
+		t.Fatalf("wrong intent: got %d, want %d", outCall.Intent(), 1)
 	}
 	log.Infof("Bob: confirmed friend; calling with intent 1")
 
@@ -369,7 +369,7 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	friend = alice.GetFriend(bob2.Username)
 	friend.Call(2)
 	outCall = <-alice.Handler.(*chanHandler).sentCall
-	if outCall.Intent != 2 {
+	if outCall.Intent() != 2 {
 		t.Fatalf("wrong intent: got %d, want %d", outCall.Intent, 2)
 	}
 	log.Infof("Alice: calling Bob with intent 2")

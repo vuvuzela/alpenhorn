@@ -5,7 +5,6 @@
 package alpenhorn
 
 import (
-	"crypto/rand"
 	"sync/atomic"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
@@ -111,10 +110,24 @@ func (c *Client) sendDialingOnion(conn typesocket.Conn, v coordinator.MixRound) 
 
 	atomic.StoreUint32(&c.lastDialingRound, round)
 
-	call := c.nextOutgoingCall(round)
 	mixMessage := new(dialing.MixMessage)
-	mixMessage.Mailbox = usernameToMailbox(call.Username, v.MixSettings.NumMailboxes)
-	copy(mixMessage.Token[:], call.dialToken[:])
+	call := c.nextOutgoingCall(round)
+	// TODO timing leak
+	if call != nil {
+		c.mu.Lock()
+		call.sentRound = round
+		c.mu.Unlock()
+
+		// Let the application know we're sending the call.
+		c.Handler.SendingCall(call)
+
+		token := call.computeKeys().token
+		copy(mixMessage.Token[:], token[:])
+		mixMessage.Mailbox = usernameToMailbox(call.Username, v.MixSettings.NumMailboxes)
+	} else {
+		// Send cover traffic.
+		mixMessage.Mailbox = 0
+	}
 
 	onion, _ := onionbox.Seal(mustMarshal(mixMessage), zeroNonce, v.MixSettings.OnionKeys)
 
@@ -124,11 +137,6 @@ func (c *Client) sendDialingOnion(conn typesocket.Conn, v coordinator.MixRound) 
 		Onion: onion,
 	}
 	conn.Send("onion", omsg)
-
-	if call.Username != "" {
-		// notify the application
-		c.Handler.SentCall(call)
-	}
 }
 
 func (c *Client) nextOutgoingCall(round uint32) *OutgoingCall {
@@ -136,22 +144,9 @@ func (c *Client) nextOutgoingCall(round uint32) *OutgoingCall {
 	defer c.mu.Unlock()
 
 	var call *OutgoingCall
-	// TODO timing leak
 	if len(c.outgoingCalls) > 0 {
 		call = c.outgoingCalls[0]
 		c.outgoingCalls = c.outgoingCalls[1:]
-
-		call.sentRound = round
-		call.dialToken = c.wheel.OutgoingDialToken(call.Username, round, call.Intent)
-		call.sessionKey = c.wheel.SessionKey(call.Username, round)
-	} else {
-		call = &OutgoingCall{
-			Username:  "",
-			Intent:    0,
-			sentRound: round,
-			dialToken: new([32]byte),
-		}
-		rand.Read(call.dialToken[:])
 	}
 
 	return call

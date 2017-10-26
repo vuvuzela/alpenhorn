@@ -48,8 +48,9 @@ type EventHandler interface {
 	// what the user specified.
 	UnexpectedSigningKey(*IncomingFriendRequest, *OutgoingFriendRequest)
 
-	// SentCall is called when an OutgoingCall is sent to the entry server.
-	SentCall(*OutgoingCall)
+	// SendingCall is called when an OutgoingCall is about to be sent to the
+	// entry server. The application can finalize the call to get its session key.
+	SendingCall(*OutgoingCall)
 
 	// ReceivedCall is called when the client receives a call from a friend.
 	ReceivedCall(*IncomingCall)

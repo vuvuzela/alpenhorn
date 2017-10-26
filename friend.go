@@ -101,12 +101,7 @@ func (f *Friend) SessionKey(round uint32) *[32]byte {
 }
 
 // Intents are the dialing intents passed to Call.
-const (
-	IntentTalk = iota
-	IntentPing
-	IntentCallMeBack
-	IntentMax
-)
+const IntentMax = 3
 
 // Call is used to call a friend using Alpenhorn's dialing protocol.
 // Call does not send the call right away but queues the call for an
@@ -123,9 +118,9 @@ func (f *Friend) Call(intent int) *OutgoingCall {
 
 	call := &OutgoingCall{
 		Username: f.Username,
-		Intent:   intent,
 		Created:  time.Now(),
 		client:   f.client,
+		intent:   intent,
 	}
 	f.client.mu.Lock()
 	f.client.outgoingCalls = append(f.client.outgoingCalls, call)
@@ -141,10 +136,10 @@ type IncomingCall struct {
 
 type OutgoingCall struct {
 	Username string
-	Intent   int
 	Created  time.Time
 
 	client     *Client
+	intent     int
 	sentRound  uint32
 	dialToken  *[32]byte
 	sessionKey *[32]byte
@@ -158,13 +153,64 @@ func (r *OutgoingCall) Sent() bool {
 	return sent
 }
 
+func (r *OutgoingCall) Intent() int {
+	r.client.mu.Lock()
+	intent := r.intent
+	r.client.mu.Unlock()
+	return intent
+}
+
+func (r *OutgoingCall) UpdateIntent(intent int) error {
+	r.client.mu.Lock()
+	defer r.client.mu.Unlock()
+	if r.dialToken != nil {
+		return ErrTooLate
+	}
+	r.intent = intent
+	return nil
+}
+
+type computeKeysResult struct{ token, sessionKey *[32]byte }
+
+func (r *OutgoingCall) computeKeys() computeKeysResult {
+	r.client.mu.Lock()
+	if r.sentRound == 0 || r.dialToken != nil {
+		r.client.mu.Unlock()
+		return computeKeysResult{
+			token:      r.dialToken,
+			sessionKey: r.sessionKey,
+		}
+	}
+	intent := r.intent
+	round := r.sentRound
+	r.client.mu.Unlock()
+
+	dialToken := r.client.wheel.OutgoingDialToken(r.Username, round, intent)
+	sessionKey := r.client.wheel.SessionKey(r.Username, round)
+
+	r.client.mu.Lock()
+	defer r.client.mu.Unlock()
+
+	if r.dialToken != nil {
+		return computeKeysResult{
+			token:      r.dialToken,
+			sessionKey: r.sessionKey,
+		}
+	}
+
+	r.intent = intent
+	r.dialToken = dialToken
+	r.sessionKey = sessionKey
+	return computeKeysResult{
+		token:      r.dialToken,
+		sessionKey: r.sessionKey,
+	}
+}
+
 // SessionKey returns the session key established for this call,
 // or nil if the call has not been sent yet.
-func (r *OutgoingCall) SessionKey() (key *[32]byte) {
-	r.client.mu.Lock()
-	key = r.sessionKey
-	r.client.mu.Unlock()
-	return
+func (r *OutgoingCall) SessionKey() *[32]byte {
+	return r.computeKeys().sessionKey
 }
 
 // Cancel removes the call from the outgoing queue, returning
