@@ -193,7 +193,7 @@ func (c *Client) Connect() error {
 	if c.KeywheelPersistPath != "" {
 		keywheelData, err := ioutil.ReadFile(c.KeywheelPersistPath)
 		if os.IsNotExist(err) {
-			err := c.persistKeywheel()
+			err := c.persistKeywheelLocked()
 			if err != nil {
 				return err
 			}

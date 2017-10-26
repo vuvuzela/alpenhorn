@@ -111,14 +111,21 @@ func (c *Client) Persist() error {
 // c.mu is locked. The keywheel and client state are usually persisted
 // at the same time to avoid leaking metadata.
 func (c *Client) persistLocked() error {
-	err := c.persistClient()
-	if e := c.persistKeywheel(); err == nil {
+	err := c.persistClientLocked()
+	if e := c.persistKeywheelLocked(); err == nil {
 		err = e
 	}
 	return err
 }
 
 func (c *Client) persistClient() error {
+	c.mu.Lock()
+	err := c.persistClientLocked()
+	c.mu.Unlock()
+	return err
+}
+
+func (c *Client) persistClientLocked() error {
 	if c.ClientPersistPath == "" {
 		return nil
 	}
@@ -156,6 +163,13 @@ func (c *Client) persistClient() error {
 }
 
 func (c *Client) persistKeywheel() error {
+	c.mu.Lock()
+	err := c.persistKeywheelLocked()
+	c.mu.Unlock()
+	return err
+}
+
+func (c *Client) persistKeywheelLocked() error {
 	if c.KeywheelPersistPath == "" {
 		return nil
 	}
