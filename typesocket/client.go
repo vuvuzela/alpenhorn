@@ -28,7 +28,7 @@ func Dial(addr string, peerKey ed25519.PublicKey) (*ClientConn, error) {
 
 	dialer := &websocket.Dialer{
 		TLSClientConfig:  tlsConfig,
-		HandshakeTimeout: 25 * time.Second,
+		HandshakeTimeout: 10 * time.Second,
 	}
 	ws, _, err := dialer.Dial(addr, nil)
 	if err != nil {
