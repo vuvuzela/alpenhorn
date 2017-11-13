@@ -2,6 +2,7 @@ package typesocket
 
 import (
 	"encoding/json"
+	"net"
 	"sync"
 	"time"
 
@@ -38,7 +39,22 @@ func Dial(addr string, peerKey ed25519.PublicKey) (*ClientConn, error) {
 		ws: ws,
 	}
 
+	ws.SetReadDeadline(time.Now().Add(pongWait))
+	ws.SetPingHandler(conn.pingHandler)
+
 	return conn, nil
+}
+
+func (c *ClientConn) pingHandler(message string) error {
+	c.ws.SetReadDeadline(time.Now().Add(pongWait))
+	// The code below is copied from the default ping handler.
+	err := c.ws.WriteControl(websocket.PongMessage, []byte(message), time.Now().Add(writeWait))
+	if err == websocket.ErrCloseSent {
+		return nil
+	} else if e, ok := err.(net.Error); ok && e.Temporary() {
+		return nil
+	}
+	return err
 }
 
 func (c *ClientConn) Close() error {
@@ -50,8 +66,6 @@ func (c *ClientConn) Close() error {
 }
 
 func (c *ClientConn) Send(msgID string, v interface{}) error {
-	const writeWait = 10 * time.Second
-
 	msg, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -63,7 +77,8 @@ func (c *ClientConn) Send(msgID string, v interface{}) error {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	//c.ws.SetWriteDeadline(time.Now().Add(writeWait))
+
+	c.ws.SetWriteDeadline(time.Now().Add(writeWait))
 	if err := c.ws.WriteJSON(e); err != nil {
 		log.WithFields(log.Fields{"call": "WriteJSON"}).Error(err)
 		return err
