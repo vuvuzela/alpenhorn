@@ -12,12 +12,9 @@ import (
 	"vuvuzela.io/alpenhorn/log"
 )
 
-type clientConn struct {
-	mu  sync.Mutex
-	ws  *websocket.Conn
-	mux Mux
-
-	closeErr chan error
+type ClientConn struct {
+	mu sync.Mutex
+	ws *websocket.Conn
 }
 
 type Conn interface {
@@ -26,7 +23,7 @@ type Conn interface {
 	Close() error
 }
 
-func Dial(addr string, peerKey ed25519.PublicKey, mux Mux) (Conn, error) {
+func Dial(addr string, peerKey ed25519.PublicKey) (*ClientConn, error) {
 	tlsConfig := edtls.NewTLSClientConfig(nil, peerKey)
 
 	dialer := &websocket.Dialer{
@@ -37,30 +34,22 @@ func Dial(addr string, peerKey ed25519.PublicKey, mux Mux) (Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn := &clientConn{
-		ws:  ws,
-		mux: mux,
-
-		closeErr: make(chan error, 1),
+	conn := &ClientConn{
+		ws: ws,
 	}
-	go conn.readLoop()
+
 	return conn, nil
 }
 
-func (c *clientConn) Close() error {
+func (c *ClientConn) Close() error {
 	c.mu.Lock()
 	c.ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, ""))
 	c.mu.Unlock()
 
-	select {
-	case err := <-c.closeErr:
-		return err
-	case <-time.After(1 * time.Second):
-		return c.ws.Close()
-	}
+	return c.ws.Close()
 }
 
-func (c *clientConn) Send(msgID string, v interface{}) error {
+func (c *ClientConn) Send(msgID string, v interface{}) error {
 	const writeWait = 10 * time.Second
 
 	msg, err := json.Marshal(v)
@@ -83,19 +72,17 @@ func (c *clientConn) Send(msgID string, v interface{}) error {
 	return nil
 }
 
-func (c *clientConn) readLoop() {
-	defer func() {
-		c.closeErr <- c.ws.Close()
-	}()
+func (c *ClientConn) Serve(mux Mux) error {
+	defer c.Close()
+
 	for {
 		var e envelope
 		if err := c.ws.ReadJSON(&e); err != nil {
 			if websocket.IsCloseError(err, websocket.CloseGoingAway) {
-				return
+				return err
 			}
-			log.WithFields(log.Fields{"call": "ReadJSON"}).Error(err)
-			return
+			return err
 		}
-		go c.mux.openEnvelope(c, &e)
+		go mux.openEnvelope(c, &e)
 	}
 }

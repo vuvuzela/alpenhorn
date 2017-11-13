@@ -57,10 +57,11 @@ func TestTypeSocket(t *testing.T) {
 	})
 
 	time.Sleep(500 * time.Millisecond)
-	conn, err := Dial(fmt.Sprintf("wss://%s/ws", l.Addr().String()), serverPublic, clientMux)
+	conn, err := Dial(fmt.Sprintf("wss://%s/ws", l.Addr().String()), serverPublic)
 	if err != nil {
 		t.Fatal(err)
 	}
+	go conn.Serve(clientMux)
 	defer conn.Close()
 	if err := conn.Send("Ping", Ping{0}); err != nil {
 		t.Fatal(err)
