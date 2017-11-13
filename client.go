@@ -7,8 +7,6 @@ package alpenhorn
 
 import (
 	"fmt"
-	"io/ioutil"
-	"os"
 	"sync"
 
 	"golang.org/x/crypto/ed25519"
@@ -86,8 +84,7 @@ type Client struct {
 	// from the client state).
 	KeywheelPersistPath string
 
-	// wheel is the Alpenhorn keywheel. It is loaded from the KeywheelPersistPath
-	// when the client connects.
+	// wheel is the Alpenhorn keywheel. It is persisted to the KeywheelPersistPath.
 	wheel keywheel.Wheel
 
 	initOnce     sync.Once
@@ -112,7 +109,6 @@ type Client struct {
 	sentFriendRequests     []*sentFriendRequest
 	outgoingCalls          []*OutgoingCall
 
-	connected     bool
 	addFriendConn typesocket.Conn
 	dialingConn   typesocket.Conn
 }
@@ -120,6 +116,13 @@ type Client struct {
 func (c *Client) init() {
 	c.initOnce.Do(func() {
 		c.edhttpClient = new(edhttp.Client)
+
+		if c.friends == nil {
+			c.friends = make(map[string]*Friend)
+		}
+
+		c.addFriendRounds = make(map[uint32]*addFriendRoundState)
+		c.dialingRounds = make(map[uint32]*dialingRoundState)
 	})
 }
 
@@ -168,100 +171,99 @@ func (c *Client) PKGStatus() []PKGStatus {
 	return statuses
 }
 
-// Connect connects to the Alpenhorn servers specified in the client's
-// connection settings and starts participating in the add-friend and
-// dialing protocols.
-func (c *Client) Connect() error {
+func (c *Client) ConnectAddFriend() (chan error, error) {
 	c.init()
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.connected {
-		return errors.New("already connected")
-	}
-
 	if c.ConfigClient == nil {
-		return errors.New("no config client")
+		return nil, errors.New("no config client")
 	}
+
+	c.mu.Lock()
 	if c.addFriendConfig == nil {
-		return errors.New("no addfriend config")
+		c.mu.Unlock()
+		return nil, errors.New("no addfriend config")
 	}
-	if c.dialingConfig == nil {
-		return errors.New("no dialing config")
-	}
-
-	if c.KeywheelPersistPath != "" {
-		keywheelData, err := ioutil.ReadFile(c.KeywheelPersistPath)
-		if os.IsNotExist(err) {
-			err := c.persistKeywheelLocked()
-			if err != nil {
-				return err
-			}
-		} else if err != nil {
-			return err
-		} else {
-			err := c.wheel.UnmarshalBinary(keywheelData)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	if c.friends == nil {
-		c.friends = make(map[string]*Friend)
-	}
-
-	c.addFriendRounds = make(map[uint32]*addFriendRoundState)
-	c.dialingRounds = make(map[uint32]*dialingRoundState)
+	c.mu.Unlock()
 
 	// Fetch the current config to get the coordinator's key and address.
 	addFriendConfig, err := c.ConfigClient.CurrentConfig("AddFriend")
 	if err != nil {
-		return errors.Wrap(err, "fetching addfriend config")
+		return nil, errors.Wrap(err, "fetching addfriend config")
 	}
 	addFriendInner := addFriendConfig.Inner.(*config.AddFriendConfig)
 
 	afwsAddr := fmt.Sprintf("wss://%s/addfriend/ws", addFriendInner.Coordinator.Address)
-	addFriendConn, err := typesocket.Dial(afwsAddr, addFriendInner.Coordinator.Key, c.addFriendMux())
+	addFriendConn, err := typesocket.Dial(afwsAddr, addFriendInner.Coordinator.Key)
 	if err != nil {
-		return err
+		return nil, err
 	}
+
+	c.mu.Lock()
+	c.addFriendConn = addFriendConn
+	c.mu.Unlock()
+
+	disconnect := make(chan error, 1)
+	go func() {
+		disconnect <- addFriendConn.Serve(c.addFriendMux())
+	}()
+
+	return disconnect, nil
+}
+
+func (c *Client) ConnectDialing() (chan error, error) {
+	c.init()
+
+	if c.ConfigClient == nil {
+		return nil, errors.New("no config client")
+	}
+
+	c.mu.Lock()
+	if c.dialingConfig == nil {
+		c.mu.Unlock()
+		return nil, errors.New("no dialing config")
+	}
+	c.mu.Unlock()
 
 	dialingConfig, err := c.ConfigClient.CurrentConfig("Dialing")
 	if err != nil {
-		return errors.Wrap(err, "fetching dialing config")
+		return nil, errors.Wrap(err, "fetching dialing config")
 	}
 	dialingInner := dialingConfig.Inner.(*config.DialingConfig)
 
 	dwsAddr := fmt.Sprintf("wss://%s/dialing/ws", dialingInner.Coordinator.Address)
-	dialingConn, err := typesocket.Dial(dwsAddr, dialingInner.Coordinator.Key, c.dialingMux())
+	dialingConn, err := typesocket.Dial(dwsAddr, dialingInner.Coordinator.Key)
 	if err != nil {
-		addFriendConn.Close()
-		return err
+		return nil, err
 	}
 
-	c.connected = true
-	c.addFriendConn = addFriendConn
+	c.mu.Lock()
 	c.dialingConn = dialingConn
+	c.mu.Unlock()
 
-	return nil
+	disconnect := make(chan error, 1)
+	go func() {
+		disconnect <- dialingConn.Serve(c.dialingMux())
+	}()
+
+	return disconnect, nil
 }
 
-func (c *Client) Close() error {
+func (c *Client) CloseAddFriend() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if !c.connected {
-		return errors.New("not connected")
+	if c.addFriendConn != nil {
+		return c.addFriendConn.Close()
 	}
+	return nil
+}
 
-	c.connected = false
-	err1 := c.dialingConn.Close()
-	err2 := c.addFriendConn.Close()
+func (c *Client) CloseDialing() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	if err1 != nil {
-		return err1
+	if c.dialingConn != nil {
+		return c.dialingConn.Close()
 	}
-	return err2
+	return nil
 }

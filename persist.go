@@ -41,7 +41,7 @@ type persistedFriend struct {
 
 // LoadClient loads a client from persisted state at the given path.
 // You should set the client's KeywheelPersistPath before connecting.
-func LoadClient(clientPersistPath string) (*Client, error) {
+func LoadClient(clientPersistPath, keywheelPersistPath string) (*Client, error) {
 	clientData, err := ioutil.ReadFile(clientPersistPath)
 	if err != nil {
 		return nil, err
@@ -53,9 +53,20 @@ func LoadClient(clientPersistPath string) (*Client, error) {
 		return nil, err
 	}
 
-	c := &Client{
-		ClientPersistPath: clientPersistPath,
+	keywheelData, err := ioutil.ReadFile(keywheelPersistPath)
+	if err != nil {
+		return nil, err
 	}
+
+	c := &Client{
+		ClientPersistPath:   clientPersistPath,
+		KeywheelPersistPath: keywheelPersistPath,
+	}
+	err = c.wheel.UnmarshalBinary(keywheelData)
+	if err != nil {
+		return nil, err
+	}
+
 	c.loadStateLocked(st)
 	return c, nil
 }

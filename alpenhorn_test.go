@@ -118,23 +118,42 @@ func (u *universe) newUser(username string) *Client {
 
 func TestAliceFriendsThenCallsBob(t *testing.T) {
 	u := createAlpenhornUniverse()
-	defer u.Destroy()
+	defer func() {
+		// Give time for goroutines to finish before pulling the rug from under them.
+		time.Sleep(1 * time.Second)
+		u.Destroy()
+	}()
 
 	alice := u.newUser("alice@example.org")
 	bob := u.newUser("bob@example.org")
 	bob.ClientPersistPath = filepath.Join(u.Dir, "bob-client")
 	bob.KeywheelPersistPath = filepath.Join(u.Dir, "bob-keywheel")
 
-	if err := alice.Connect(); err != nil {
+	_, err := alice.ConnectAddFriend()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := bob.Connect(); err != nil {
+	defer alice.CloseAddFriend()
+	_, err = alice.ConnectDialing()
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer alice.CloseDialing()
+
+	disconnectBobAddFriend, err := bob.ConnectAddFriend()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob.CloseAddFriend()
+	disconnectBobDialing, err := bob.ConnectDialing()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob.CloseDialing()
 
 	time.Sleep(2 * time.Second)
 
-	_, err := alice.SendFriendRequest(bob.Username, nil)
+	_, err = alice.SendFriendRequest(bob.Username, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,19 +205,32 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	}
 
 	// Test persistence.
-	if err := bob.Close(); err != nil {
+	if err := bob.CloseAddFriend(); err != nil {
 		t.Fatal(err)
 	}
-	bob2, err := LoadClient(bob.ClientPersistPath)
+	if err := bob.CloseDialing(); err != nil {
+		t.Fatal(err)
+	}
+	<-disconnectBobAddFriend
+	<-disconnectBobDialing
+
+	bob2, err := LoadClient(bob.ClientPersistPath, bob.KeywheelPersistPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	bob2.ConfigClient = u.ConfigClient
-	bob2.KeywheelPersistPath = bob.KeywheelPersistPath
 	bob2.Handler = newChanHandler("bob2")
-	if err := bob2.Connect(); err != nil {
+
+	_, err = bob2.ConnectAddFriend()
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer bob2.CloseAddFriend()
+	_, err = bob2.ConnectDialing()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob2.CloseDialing()
 
 	friend = bob2.GetFriend(alice.Username)
 	friend.Call(0)
