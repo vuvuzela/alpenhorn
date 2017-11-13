@@ -24,9 +24,13 @@ type Client struct {
 	ConfigServerURL string
 }
 
+var httpClient = &http.Client{
+	Timeout: 10 * time.Second,
+}
+
 func (c *Client) CurrentConfig(service string) (*SignedConfig, error) {
 	url := fmt.Sprintf("%s/current?service=%s", c.ConfigServerURL, service)
-	resp, err := http.Get(url)
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return nil, err
 	}
