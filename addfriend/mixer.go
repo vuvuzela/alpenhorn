@@ -43,8 +43,8 @@ func (srv *Mixer) MessageSize() int {
 	return sizeMixMessage
 }
 
-func (srv *Mixer) NoiseCount() uint32 {
-	return srv.Laplace.Uint32()
+func (srv *Mixer) NoiseDistribution() rand.Laplace {
+	return srv.Laplace
 }
 
 var zeroNonce = new([24]byte)

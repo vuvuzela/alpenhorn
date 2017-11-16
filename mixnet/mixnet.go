@@ -43,8 +43,8 @@ type MixService interface {
 	// after the last onion layer is peeled.
 	MessageSize() int
 
-	// NoiseCount returns how much noise to generate for a mailbox.
-	NoiseCount() uint32
+	// NoiseDistribution returns the distribution from which to generate noise.
+	NoiseDistribution() rand.Laplace
 
 	// FillWithNoise generates noise to provide differential privacy.
 	// noiseCounts specifies how much noise to add to each mailbox.
@@ -271,12 +271,13 @@ func (srv *Server) SetRoundSettings(ctx context.Context, req *pb.SetRoundSetting
 	// Now is a good time to start generating noise.
 	go func() {
 		service := srv.Services[settings.Service]
+		laplace := service.NoiseDistribution()
 
 		// NOTE: unlike the convo protocol, the last server also adds noise
 		noiseTotal := uint32(0)
 		noiseCounts := make([]uint32, st.numMailboxes+1)
 		for b := range noiseCounts {
-			bmu := service.NoiseCount()
+			bmu := laplace.Uint32()
 			noiseCounts[b] = bmu
 			noiseTotal += bmu
 		}
