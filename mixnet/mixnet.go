@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"sync"
 	"time"
@@ -475,8 +476,8 @@ func (srv *Server) nextHop(ctx context.Context, req *pb.CloseRoundRequest, st *r
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			// TODO read error message from body
-			err = errors.New("bad CDN response: %s", resp.Status)
+			msg, _ := ioutil.ReadAll(resp.Body)
+			err = errors.New("bad CDN response: %s: %q", resp.Status, msg)
 			goto End
 		}
 		url = fmt.Sprintf("https://%s/get?bucket=%s/%d", st.cdnAddress, req.Service, req.Round)
