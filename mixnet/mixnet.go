@@ -395,14 +395,12 @@ func (srv *Server) CloseRound(ctx context.Context, req *pb.CloseRoundRequest) (*
 
 	numIncoming := len(st.incoming)
 	srv.filterIncoming(st)
-	numFiltered := numIncoming - len(st.incoming)
 
 	srv.Log.WithFields(log.Fields{
 		"service":  req.Service,
 		"round":    req.Round,
 		"rpc":      "CloseRound",
 		"incoming": numIncoming,
-		"filtered": numFiltered,
 	}).Info("Filtered onions")
 
 	<-st.noiseDone
