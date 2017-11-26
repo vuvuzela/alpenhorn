@@ -39,6 +39,7 @@ type Config struct {
 
 	DBName     string
 	ListenAddr string
+	LogsDir    string
 }
 
 var funcMap = template.FuncMap{
@@ -54,6 +55,7 @@ coordinatorKey = "change me"
 
 dbName = {{.DBName | printf "%q"}}
 listenAddr = {{.ListenAddr | printf "%q"}}
+logsDir = {{.LogsDir | printf "%q" }}
 `
 
 func writeNewConfig() {
@@ -65,6 +67,8 @@ func writeNewConfig() {
 	conf := &Config{
 		PublicKey:  publicKey,
 		PrivateKey: privateKey,
+
+		LogsDir: alplog.DefaultLogsDir("alpenhorn-pkg", publicKey),
 
 		DBName:     "pkg",
 		ListenAddr: "0.0.0.0:80",
@@ -85,11 +89,6 @@ func writeNewConfig() {
 		log.Fatal(err)
 	}
 	fmt.Printf("wrote %s\n", path)
-}
-
-func init() {
-	log.LogDates(log.Stderr)
-	log.StdLogger.EntryHandler = alplog.OutputText(log.Stderr)
 }
 
 func main() {
@@ -139,7 +138,16 @@ func main() {
 		WriteTimeout: 60 * time.Second,
 	}
 
+	logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// Let the user know what's happening before switching the logger.
+	log.Infof("Listening on %q; logging to %s", conf.ListenAddr, logHandler.Name())
+	log.StdLogger.EntryHandler = logHandler
+	// Record the start time in the logs directory.
 	log.Infof("Listening on %q", conf.ListenAddr)
+
 	err = httpServer.Serve(listener)
 	if err != nil {
 		log.Fatalf("http listen: %s", err)

@@ -35,7 +35,9 @@ var (
 type Config struct {
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
+
 	ListenAddr string
+	LogsDir    string
 
 	AddFriendDelay time.Duration
 	DialingDelay   time.Duration
@@ -54,7 +56,9 @@ const confTemplate = `# Alpenhorn coordinator (entry) server config
 
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
+
 listenAddr = {{.ListenAddr | printf "%q"}}
+logsDir = {{.LogsDir | printf "%q" }}
 
 addFriendDelay = {{.AddFriendDelay | printf "%q"}}
 dialingDelay   = {{.DialingDelay | printf "%q"}}
@@ -128,7 +132,9 @@ func writeNewConfig(path string) {
 	conf := &Config{
 		PublicKey:  publicKey,
 		PrivateKey: privateKey,
+
 		ListenAddr: "0.0.0.0:8000",
+		LogsDir:    alplog.DefaultLogsDir("alpenhorn-coordinator", publicKey),
 
 		AddFriendDelay: 10 * time.Second,
 		DialingDelay:   5 * time.Second,
@@ -179,17 +185,21 @@ func main() {
 		log.Fatalf("error parsing config %s: %s", confPath, err)
 	}
 
-	log.LogDates(log.Stderr)
+	logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	logger := &log.Logger{
+		Level:        log.InfoLevel,
+		EntryHandler: logHandler,
+	}
 
 	var addFriendServer *coordinator.Server
 	if conf.AddFriendMailboxes > 0 {
 		addFriendServer = &coordinator.Server{
 			Service:    "AddFriend",
 			PrivateKey: conf.PrivateKey,
-			Log: (&log.Logger{
-				Level:        log.InfoLevel,
-				EntryHandler: alplog.OutputText(log.Stderr),
-			}).WithFields(log.Fields{"service": "AddFriend"}),
+			Log:        logger.WithFields(log.Fields{"service": "AddFriend"}),
 
 			ConfigClient: config.StdClient,
 
@@ -214,10 +224,7 @@ func main() {
 		dialingServer = &coordinator.Server{
 			Service:    "Dialing",
 			PrivateKey: conf.PrivateKey,
-			Log: (&log.Logger{
-				Level:        log.InfoLevel,
-				EntryHandler: alplog.OutputText(log.Stderr),
-			}).WithFields(log.Fields{"service": "Dialing"}),
+			Log:        logger.WithFields(log.Fields{"service": "Dialing"}),
 
 			ConfigClient: config.StdClient,
 
@@ -255,10 +262,12 @@ func main() {
 		log.Fatalf("edtls listen: %s", err)
 	}
 
-	log.Infof("Listening on: %s", conf.ListenAddr)
+	log.Infof("Listening on %q; logging to %s", conf.ListenAddr, logHandler.Name())
+	logger.Infof("Listening on %q", conf.ListenAddr)
+
 	err = http.Serve(listener, nil)
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatalf("Shutdown: %s", err)
 	}
 }
 

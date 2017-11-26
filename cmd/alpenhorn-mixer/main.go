@@ -34,11 +34,13 @@ var (
 )
 
 type Config struct {
-	ListenAddr string
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
 
 	CoordinatorKey ed25519.PublicKey
+
+	ListenAddr string
+	LogsDir    string
 
 	AddFriendNoise rand.Laplace
 	DialingNoise   rand.Laplace
@@ -50,12 +52,13 @@ var funcMap = template.FuncMap{
 
 const confTemplate = `# Alpenhorn mixnet server config
 
-listenAddr = {{.ListenAddr | printf "%q"}}
-
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
 
 coordinatorKey = "change me"
+
+listenAddr = {{.ListenAddr | printf "%q"}}
+logsDir = {{.LogsDir | printf "%q" }}
 
 [addFriendNoise]
 mu = {{.AddFriendNoise.Mu | printf "%0.1f"}}
@@ -76,6 +79,8 @@ func writeNewConfig() {
 		ListenAddr: "0.0.0.0:28000",
 		PublicKey:  publicKey,
 		PrivateKey: privateKey,
+
+		LogsDir: alplog.DefaultLogsDir("alpenhorn-mixer", publicKey),
 
 		AddFriendNoise: rand.Laplace{
 			Mu: 100,
@@ -105,10 +110,6 @@ func writeNewConfig() {
 	fmt.Printf("wrote %s\n", path)
 }
 
-func init() {
-	log.LogDates(log.Stderr)
-}
-
 func main() {
 	flag.Parse()
 
@@ -136,12 +137,17 @@ func main() {
 		log.Fatal("no alpenhorn coordinator key specified in config")
 	}
 
+	logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	mixServer := &mixnet.Server{
 		SigningKey:     conf.PrivateKey,
 		CoordinatorKey: conf.CoordinatorKey,
 		Log: &log.Logger{
 			Level:        log.InfoLevel,
-			EntryHandler: alplog.OutputText(log.Stderr),
+			EntryHandler: logHandler,
 		},
 
 		Services: map[string]mixnet.MixService{
@@ -160,12 +166,15 @@ func main() {
 
 	pb.RegisterMixnetServer(grpcServer, mixServer)
 
-	log.Infof("Listening on %q", conf.ListenAddr)
+	// Record the start time in the logs dir and on stderr.
+	mixServer.Log.Infof("Listening on %q")
+	log.Infof("Listening on %q; logging to %s", conf.ListenAddr, logHandler.Name())
+
 	listener, err := net.Listen("tcp", conf.ListenAddr)
 	if err != nil {
 		log.Fatalf("net.Listen: %s", err)
 	}
 
 	err = grpcServer.Serve(listener)
-	log.Fatal(err)
+	mixServer.Log.Fatalf("Shutdown: %s", err)
 }

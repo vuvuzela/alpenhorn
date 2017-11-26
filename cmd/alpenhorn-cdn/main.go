@@ -32,6 +32,7 @@ var (
 type Config struct {
 	DBPath         string
 	ListenAddr     string
+	LogsDir        string
 	PublicKey      ed25519.PublicKey
 	PrivateKey     ed25519.PrivateKey
 	CoordinatorKey ed25519.PublicKey
@@ -45,6 +46,7 @@ const confTemplate = `# Alpenhorn CDN config
 
 dbPath = {{.DBPath | printf "%q" }}
 listenAddr = {{.ListenAddr | printf "%q" }}
+logsDir = {{.LogsDir | printf "%q" }}
 
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
@@ -61,6 +63,7 @@ func writeNewConfig() {
 	conf := &Config{
 		PublicKey:  publicKey,
 		PrivateKey: privateKey,
+		LogsDir:    alplog.DefaultLogsDir("alpenhorn-cdn", publicKey),
 	}
 
 	tmpl := template.Must(template.New("config").Funcs(funcMap).Parse(confTemplate))
@@ -78,11 +81,6 @@ func writeNewConfig() {
 		log.Fatal(err)
 	}
 	fmt.Printf("wrote %s\n", path)
-}
-
-func init() {
-	log.LogDates(log.Stderr)
-	log.StdLogger.EntryHandler = alplog.OutputText(log.Stderr)
 }
 
 func main() {
@@ -115,6 +113,11 @@ func main() {
 		log.Fatalf("invalid coordinator key in config: %q", base32.EncodeToString(conf.CoordinatorKey))
 	}
 
+	logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	server, err := cdn.New(conf.DBPath, conf.CoordinatorKey)
 	if err != nil {
 		log.Fatal(err)
@@ -125,6 +128,10 @@ func main() {
 		log.Fatalf("edtls listen: %s", err)
 	}
 
+	log.Infof("Listening on %q; logging to %s", conf.ListenAddr, logHandler.Name())
+	log.StdLogger.EntryHandler = logHandler
+	log.Infof("Listening on %q", conf.ListenAddr)
+
 	err = http.Serve(listener, server)
-	log.Fatal(err)
+	log.Fatalf("Shutdown: %s", err)
 }

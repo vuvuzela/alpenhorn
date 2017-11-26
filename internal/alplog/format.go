@@ -8,7 +8,13 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
+	"os/user"
+	"path/filepath"
 	"sync"
+
+	"github.com/davidlazar/go-crypto/encoding/base32"
+	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/log/ansi"
@@ -20,24 +26,80 @@ var bufPool = sync.Pool{
 	},
 }
 
+type ProductionOutput struct {
+	dirHandler    *log.OutputDir
+	stderrHandler outputText
+}
+
+func NewProductionOutput(logsDir string) (ProductionOutput, error) {
+	h := ProductionOutput{
+		stderrHandler: outputText{
+			dst: log.Stderr,
+		},
+	}
+
+	if logsDir != "" {
+		err := os.MkdirAll(logsDir, 0770)
+		if err != nil {
+			return h, fmt.Errorf("failed to create logs directory: %s", err)
+		}
+
+		h.dirHandler = &log.OutputDir{
+			Dir: logsDir,
+		}
+	}
+
+	return h, nil
+}
+
+func (h ProductionOutput) Name() string {
+	if h.dirHandler == nil {
+		return "[stderr]"
+	}
+	return h.dirHandler.Dir
+}
+
+func (h ProductionOutput) Fire(e *log.Entry) {
+	if h.dirHandler != nil {
+		h.dirHandler.Fire(e)
+
+		// Only print errors to stderr.
+		if e.Level > log.ErrorLevel {
+			return
+		}
+	}
+	h.stderrHandler.Fire(e)
+}
+
 type outputText struct {
 	dst io.Writer
 }
 
 func OutputText(dst io.Writer) log.EntryHandler {
-	return &outputText{dst}
+	return outputText{dst}
 }
 
-func (h *outputText) Fire(e *log.Entry) {
+func (h outputText) Fire(e *log.Entry) {
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 
+	prettyPrint(buf, e)
+
+	_, err := h.dst.Write(buf.Bytes())
+	if err != nil {
+		fmt.Fprintf(log.Stderr, "Error writing log entry: %s", err)
+	}
+
+	bufPool.Put(buf)
+}
+
+func prettyPrint(buf *bytes.Buffer, e *log.Entry) {
 	color := e.Level.Color()
 	if e.Level == log.InfoLevel {
 		// Colorful timestamps on info messages are too distracting.
-		buf.WriteString(e.Time.Format("15:04:05"))
+		buf.WriteString(e.Time.Format("2006-01-02 15:04:05"))
 	} else {
-		ansi.WriteString(buf, e.Time.Format("15:04:05"), color, ansi.Bold)
+		ansi.WriteString(buf, e.Time.Format("2006-01-02 15:04:05"), color, ansi.Bold)
 	}
 
 	fmt.Fprintf(buf, " %s ", e.Level.Icon())
@@ -77,11 +139,18 @@ func (h *outputText) Fire(e *log.Entry) {
 	fmt.Fprintf(buf, "%-42s ", tag+rpc+e.Message)
 	log.Logfmt(buf, fields, color)
 	buf.WriteByte('\n')
+}
 
-	_, err := h.dst.Write(buf.Bytes())
+// DefaultLogsDir returns a default location for log files.
+// serverType is a string like "alpenhorn-mixer".
+func DefaultLogsDir(serverType string, publicKey ed25519.PublicKey) string {
+	user, err := user.Current()
 	if err != nil {
-		fmt.Fprintf(log.Stderr, "Error writing log entry: %s", err)
+		panic(err)
 	}
 
-	bufPool.Put(buf)
+	publicKeyStr := base32.EncodeToString(publicKey)
+	logsDir := filepath.Join(user.HomeDir, ".vuvuzela", "logs", fmt.Sprintf("%s-%s", serverType, publicKeyStr[:10]))
+
+	return logsDir
 }
