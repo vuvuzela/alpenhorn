@@ -118,10 +118,20 @@ func main() {
 		log.Fatalf("invalid config: %s", err)
 	}
 
+	logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	pkgConfig := &pkg.Config{
-		SigningKey:     conf.PrivateKey,
 		DBName:         conf.DBName,
+		SigningKey:     conf.PrivateKey,
 		CoordinatorKey: conf.CoordinatorKey,
+
+		Logger: &log.Logger{
+			Level:        log.InfoLevel,
+			EntryHandler: logHandler,
+		},
 	}
 	pkgServer, err := pkg.NewServer(pkgConfig)
 	if err != nil {
@@ -138,15 +148,10 @@ func main() {
 		WriteTimeout: 60 * time.Second,
 	}
 
-	logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
-	if err != nil {
-		log.Fatal(err)
-	}
 	// Let the user know what's happening before switching the logger.
 	log.Infof("Listening on %q; logging to %s", conf.ListenAddr, logHandler.Name())
-	log.StdLogger.EntryHandler = logHandler
 	// Record the start time in the logs directory.
-	log.Infof("Listening on %q", conf.ListenAddr)
+	pkgConfig.Logger.Infof("Listening on %q", conf.ListenAddr)
 
 	err = httpServer.Serve(listener)
 	if err != nil {

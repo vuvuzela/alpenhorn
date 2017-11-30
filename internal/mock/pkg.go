@@ -6,7 +6,6 @@ package mock
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 
 	"golang.org/x/crypto/ed25519"
@@ -14,6 +13,7 @@ import (
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/internal/pg"
+	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/crypto/rand"
 )
@@ -57,8 +57,12 @@ func LaunchPKG(coordinatorKey ed25519.PublicKey, sendMail pkg.SendMailHandler) (
 	pg.Createdb(dbName)
 
 	config := &pkg.Config{
-		SigningKey:     privateKey,
-		DBName:         dbName,
+		SigningKey: privateKey,
+		DBName:     dbName,
+		Logger: &log.Logger{
+			Level:        log.ErrorLevel,
+			EntryHandler: log.OutputText(log.Stderr),
+		},
 		CoordinatorKey: coordinatorKey,
 
 		SendVerificationEmail: sendMail,

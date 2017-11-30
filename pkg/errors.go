@@ -7,12 +7,12 @@ package pkg
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/lib/pq"
 )
 
+//go:generate stringer -type=ErrorCode
 type ErrorCode int
 
 const (
@@ -66,6 +66,25 @@ func (e ErrorCode) httpCode() int {
 	}
 }
 
+func errorCode(err error) ErrorCode {
+	switch err := err.(type) {
+	case Error:
+		return err.Code
+	case *pq.Error:
+		return ErrDatabaseError
+	default:
+		return ErrUnknown
+	}
+}
+
+func isInternalError(err error) bool {
+	switch errorCode(err) {
+	case ErrDatabaseError, ErrSendingEmail, ErrBadCommitment, ErrUnknown:
+		return true
+	}
+	return false
+}
+
 type Error struct {
 	Code    ErrorCode
 	Message string
@@ -82,7 +101,7 @@ func (e Error) Error() string {
 	return fmt.Sprintf("%s: %s", txt, e.Message)
 }
 
-func errorf(code ErrorCode, format string, args ...interface{}) error {
+func errorf(code ErrorCode, format string, args ...interface{}) Error {
 	return Error{
 		Code:    code,
 		Message: fmt.Sprintf(format, args...),
@@ -92,22 +111,18 @@ func errorf(code ErrorCode, format string, args ...interface{}) error {
 func httpError(w http.ResponseWriter, err error) {
 	var pkgError Error
 	switch v := err.(type) {
-	case *pq.Error:
-		pkgError = Error{ErrDatabaseError, err.Error()}
 	case Error:
 		pkgError = v
 	default:
-		pkgError = Error{ErrUnknown, err.Error()}
+		pkgError = Error{errorCode(err), err.Error()}
 	}
+
 	data, err := json.Marshal(pkgError)
 	if err != nil {
 		// this shouldn't happen
 		panic(err)
 	}
 	httpCode := pkgError.Code.httpCode()
-	if httpCode == http.StatusInternalServerError {
-		log.Printf("pkg error: %s", pkgError.Error())
-	}
 	w.WriteHeader(httpCode)
 	w.Write(data)
 }

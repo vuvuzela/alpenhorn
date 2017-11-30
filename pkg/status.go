@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"golang.org/x/crypto/ed25519"
+	"vuvuzela.io/alpenhorn/log"
 )
 
 type statusArgs struct {
@@ -44,6 +45,12 @@ func (srv *Server) statusHandler(w http.ResponseWriter, req *http.Request) {
 
 	reply, err := srv.checkStatus(args)
 	if err != nil {
+		if isInternalError(err) {
+			srv.log.WithFields(log.Fields{
+				"username": args.Username,
+				"code":     errorCode(err).String(),
+			}).Errorf("Status failed: %s", err)
+		}
 		httpError(w, err)
 		return
 	}

@@ -16,6 +16,7 @@ import (
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/box"
 
+	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/crypto/bls"
 	"vuvuzela.io/crypto/ibe"
 )
@@ -98,6 +99,13 @@ func (srv *Server) extractHandler(w http.ResponseWriter, req *http.Request) {
 
 	reply, err := srv.extract(args)
 	if err != nil {
+		if isInternalError(err) {
+			srv.log.WithFields(log.Fields{
+				"round":    args.Round,
+				"username": args.Username,
+				"code":     errorCode(err).String(),
+			}).Errorf("Extraction failed: %s", err)
+		}
 		httpError(w, err)
 		return
 	}

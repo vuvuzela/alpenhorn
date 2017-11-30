@@ -11,7 +11,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/davidlazar/go-crypto/encoding/base32"
 	"golang.org/x/crypto/ed25519"
+
+	"vuvuzela.io/alpenhorn/log"
 )
 
 type registerArgs struct {
@@ -29,11 +32,21 @@ func (srv *Server) registerHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	logger := srv.log.WithFields(log.Fields{"username": args.Username, "loginKey": base32.EncodeToString(args.LoginKey)})
 	err = srv.register(args.Username, args.LoginKey)
 	if err != nil {
+		logger = logger.WithFields(log.Fields{"code": errorCode(err).String()})
+		if isInternalError(err) {
+			logger.Errorf("Registration failed: %s", err)
+		} else {
+			// Avoid polluting stderr for user-caused errors.
+			logger.Infof("Registration failed: %s", err)
+		}
 		httpError(w, err)
 		return
 	}
+	logger.Info("Registration successful")
+
 	// reply with valid json
 	w.Write([]byte("\"OK\""))
 }

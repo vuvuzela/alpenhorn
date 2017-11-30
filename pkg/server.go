@@ -26,6 +26,7 @@ import (
 	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/errors"
+	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/crypto/bls"
 	"vuvuzela.io/crypto/ibe"
 )
@@ -37,6 +38,7 @@ import (
 type Server struct {
 	db       *sql.DB
 	userStmt *sql.Stmt
+	log      *log.Logger
 
 	mu     sync.Mutex
 	rounds map[uint32]*roundState
@@ -68,6 +70,10 @@ type Config struct {
 
 	// CoordinatorKey is the key that's authorized to start new PKG rounds.
 	CoordinatorKey ed25519.PublicKey
+
+	// Logger is the logger used to write log messages. The standard logger
+	// is used if Logger is nil.
+	Logger *log.Logger
 
 	// SendVerificationEmail is invoked by the PKG to verify the identity
 	// of a user when they register. This function should send an email
@@ -125,9 +131,15 @@ func NewServer(conf *Config) (*Server, error) {
 		return nil, err
 	}
 
+	logger := conf.Logger
+	if logger == nil {
+		logger = log.StdLogger
+	}
+
 	s := &Server{
 		db:             db,
 		userStmt:       stmt,
+		log:            logger,
 		rounds:         make(map[uint32]*roundState),
 		privateKey:     conf.SigningKey,
 		publicKey:      conf.SigningKey.Public().(ed25519.PublicKey),
@@ -217,6 +229,8 @@ func (srv *Server) commitHandler(w http.ResponseWriter, req *http.Request) {
 		srv.rounds[round] = st
 		srv.mu.Unlock()
 	}
+
+	srv.log.WithFields(log.Fields{"round": args.Round}).Info("Commit")
 
 	srv.mu.Lock()
 	for r, _ := range srv.rounds {
@@ -315,6 +329,8 @@ func (srv *Server) revealHandler(w http.ResponseWriter, req *http.Request) {
 		}
 		st.revealSignature = ed25519.Sign(srv.privateKey, buf.Bytes())
 	}
+
+	srv.log.WithFields(log.Fields{"round": args.Round}).Info("Reveal")
 
 	reply := &RevealReply{
 		MasterPublicKey: st.masterPublicKey,

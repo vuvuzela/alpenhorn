@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ed25519"
+
+	"vuvuzela.io/alpenhorn/log"
 )
 
 type verifyArgs struct {
@@ -47,9 +49,16 @@ func (srv *Server) verifyHandler(w http.ResponseWriter, req *http.Request) {
 
 	err = srv.verify(args)
 	if err != nil {
+		if isInternalError(err) {
+			srv.log.WithFields(log.Fields{
+				"username": args.Username,
+				"code":     errorCode(err).String(),
+			}).Errorf("Verify failed: %s", err)
+		}
 		httpError(w, err)
 		return
 	}
+
 	w.Write([]byte("\"OK\""))
 }
 

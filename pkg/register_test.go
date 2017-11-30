@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/internal/pg"
+	"vuvuzela.io/alpenhorn/log"
 )
 
 func BenchmarkRegister(b *testing.B) {
@@ -20,7 +21,11 @@ func BenchmarkRegister(b *testing.B) {
 
 	_, serverPriv, _ := ed25519.GenerateKey(rand.Reader)
 	conf := &Config{
-		DBName:     "benchmark_register",
+		DBName: "benchmark_register",
+		Logger: &log.Logger{
+			Level:        log.ErrorLevel,
+			EntryHandler: log.OutputText(log.Stderr),
+		},
 		SigningKey: serverPriv,
 	}
 	srv, err := NewServer(conf)
