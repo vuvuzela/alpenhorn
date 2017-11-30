@@ -225,8 +225,14 @@ func (srv *Server) commitHandler(w http.ResponseWriter, req *http.Request) {
 			blsPublicKey:     blsPub,
 			blsPrivateKey:    blsPriv,
 		}
+
 		srv.mu.Lock()
-		srv.rounds[round] = st
+		cst, ok := srv.rounds[round]
+		if !ok {
+			srv.rounds[round] = st
+		} else {
+			st = cst
+		}
 		srv.mu.Unlock()
 	}
 
