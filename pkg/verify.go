@@ -40,6 +40,12 @@ func (a *verifyArgs) msg() []byte {
 }
 
 func (srv *Server) verifyHandler(w http.ResponseWriter, req *http.Request) {
+	if srv.sendVerificationEmail == nil {
+		// Usernames do not need to be verified in FCFS mode.
+		http.NotFound(w, req)
+		return
+	}
+
 	args := new(verifyArgs)
 	err := json.NewDecoder(req.Body).Decode(args)
 	if err != nil {
