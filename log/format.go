@@ -140,7 +140,7 @@ func (h *OutputDir) persistEntry(e *Entry) error {
 		}
 	}
 
-	path := filepath.Join(h.Dir, fmt.Sprintf("%d-%d-%d.log", y, m, d))
+	path := filepath.Join(h.Dir, e.Time.Format("2006-01-02")+".log")
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("error opening log file %s: %s", path, err)
