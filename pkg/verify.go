@@ -46,8 +46,9 @@ func (srv *Server) verifyHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	body := http.MaxBytesReader(w, req.Body, 512)
 	args := new(verifyArgs)
-	err := json.NewDecoder(req.Body).Decode(args)
+	err := json.NewDecoder(body).Decode(args)
 	if err != nil {
 		httpError(w, errorf(ErrBadRequestJSON, "%s", err))
 		return

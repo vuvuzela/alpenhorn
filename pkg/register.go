@@ -25,8 +25,9 @@ type registerArgs struct {
 }
 
 func (srv *Server) registerHandler(w http.ResponseWriter, req *http.Request) {
+	body := http.MaxBytesReader(w, req.Body, 256)
 	args := new(registerArgs)
-	err := json.NewDecoder(req.Body).Decode(args)
+	err := json.NewDecoder(body).Decode(args)
 	if err != nil {
 		httpError(w, errorf(ErrBadRequestJSON, "%s", err))
 		return
