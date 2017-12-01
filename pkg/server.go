@@ -9,7 +9,7 @@ package pkg
 import (
 	"bytes"
 	"crypto/rand"
-	"crypto/sha256"
+	"crypto/sha512"
 	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
@@ -260,7 +260,7 @@ func (srv *Server) commitHandler(w http.ResponseWriter, req *http.Request) {
 func commitTo(ibeKey *ibe.MasterPublicKey, blsKey *bls.PublicKey) []byte {
 	ibeKeyBytes, _ := ibeKey.MarshalBinary()
 	blsKeyBytes, _ := blsKey.MarshalBinary()
-	h := sha256.Sum256(append(ibeKeyBytes, blsKeyBytes...))
+	h := sha512.Sum512_256(append(ibeKeyBytes, blsKeyBytes...))
 	return h[:]
 }
 
