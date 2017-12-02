@@ -19,6 +19,7 @@ const (
 	ErrBadRequestJSON ErrorCode = iota + 1
 	ErrDatabaseError
 	ErrInvalidUsername
+	ErrInvalidLoginKey
 	ErrNotRegistered
 	ErrNotVerified
 	ErrAlreadyRegistered
@@ -39,6 +40,7 @@ var errText = map[ErrorCode]string{
 	ErrBadRequestJSON:         "invalid json in request",
 	ErrDatabaseError:          "internal database error",
 	ErrInvalidUsername:        "invalid username",
+	ErrInvalidLoginKey:        "invalid login key",
 	ErrNotRegistered:          "username not registered",
 	ErrNotVerified:            "username not verified",
 	ErrAlreadyRegistered:      "username already registered",

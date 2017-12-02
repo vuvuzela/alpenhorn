@@ -64,6 +64,9 @@ func (srv *Server) register(username string, loginKey ed25519.PublicKey) error {
 	if err := ValidateUsername(username); err != nil {
 		return errorf(ErrInvalidUsername, "%s", err)
 	}
+	if len(loginKey) != ed25519.PublicKeySize {
+		return errorf(ErrInvalidLoginKey, "got %d bytes, want %d bytes", len(loginKey), ed25519.PublicKeySize)
+	}
 
 	tx, err := srv.db.Begin()
 	if err != nil {
