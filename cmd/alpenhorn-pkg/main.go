@@ -38,6 +38,7 @@ type Config struct {
 	CoordinatorKey ed25519.PublicKey
 
 	DBName     string
+	DBPath     string // path to the Badger DB
 	ListenAddr string
 	LogsDir    string
 }
@@ -54,6 +55,7 @@ privateKey = {{.PrivateKey | base32 | printf "%q"}}
 coordinatorKey = "change me"
 
 dbName = {{.DBName | printf "%q"}}
+dbPath = {{.DBPath | printf "%q"}}
 listenAddr = {{.ListenAddr | printf "%q"}}
 logsDir = {{.LogsDir | printf "%q" }}
 `
@@ -71,6 +73,7 @@ func writeNewConfig() {
 		LogsDir: alplog.DefaultLogsDir("alpenhorn-pkg", publicKey),
 
 		DBName:     "pkg",
+		DBPath:     "pkg_data",
 		ListenAddr: "0.0.0.0:80",
 	}
 
@@ -125,6 +128,7 @@ func main() {
 
 	pkgConfig := &pkg.Config{
 		DBName:         conf.DBName,
+		BadgerDBPath:   conf.DBPath,
 		SigningKey:     conf.PrivateKey,
 		CoordinatorKey: conf.CoordinatorKey,
 

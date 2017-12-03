@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ed25519"
 
@@ -42,5 +43,20 @@ func TestMarshalExtractReply(t *testing.T) {
 
 	if !reflect.DeepEqual(reply, ureply) {
 		t.Fatalf("after unmarshal: got %#v, want %#v", ureply, reply)
+	}
+}
+
+func TestMarshalLastExtraction(t *testing.T) {
+	e := lastExtraction{
+		Round:    12345,
+		UnixTime: time.Now().Unix(),
+	}
+	data := e.Marshal()
+	var e2 lastExtraction
+	if err := e2.Unmarshal(data); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(e, e2) {
+		t.Fatalf("after unmarshal: got %#v, want %#v", e2, e)
 	}
 }

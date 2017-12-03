@@ -6,7 +6,9 @@ package mock
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net/http"
+	"os"
 
 	"golang.org/x/crypto/ed25519"
 
@@ -24,13 +26,16 @@ type PKG struct {
 	dbName     string
 	pkgServer  *pkg.Server
 	httpServer *http.Server
+
+	badgerDBPath string
 }
 
 func (p *PKG) Close() error {
 	err1 := p.httpServer.Close()
 	err2 := p.pkgServer.Close()
+	err3 := os.RemoveAll(p.badgerDBPath)
 	pg.Dropdb(p.dbName)
-	return firstError(err1, err2)
+	return firstError(err1, err2, err3)
 }
 
 func firstError(errors ...error) error {
@@ -56,9 +61,15 @@ func LaunchPKG(coordinatorKey ed25519.PublicKey, sendMail pkg.SendMailHandler) (
 	dbName := fmt.Sprintf("alpenhorn_mock_pkg_%x", id)
 	pg.Createdb(dbName)
 
+	badgerDir, err := ioutil.TempDir("", "alpenhorn_pkg_badger_")
+	if err != nil {
+		return nil, err
+	}
+
 	config := &pkg.Config{
-		SigningKey: privateKey,
-		DBName:     dbName,
+		SigningKey:   privateKey,
+		DBName:       dbName,
+		BadgerDBPath: badgerDir,
 		Logger: &log.Logger{
 			Level:        log.ErrorLevel,
 			EntryHandler: log.OutputText(log.Stderr),
@@ -91,5 +102,7 @@ func LaunchPKG(coordinatorKey ed25519.PublicKey, sendMail pkg.SendMailHandler) (
 		dbName:     dbName,
 		pkgServer:  pkgServer,
 		httpServer: httpServer,
+
+		badgerDBPath: badgerDir,
 	}, nil
 }

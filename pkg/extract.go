@@ -13,9 +13,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/dgraph-io/badger"
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/box"
 
+	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/crypto/bls"
 	"vuvuzela.io/crypto/ibe"
@@ -175,6 +177,18 @@ func (srv *Server) extract(args *extractArgs) (*extractReply, error) {
 		return nil, errorf(ErrInvalidSignature, "key=%x", user.Key)
 	}
 
+	lastExtraction := lastExtraction{
+		Round:    args.Round,
+		UnixTime: time.Now().Unix(),
+	}
+	err = srv.badgerDB.Update(func(tx *badger.Txn) error {
+		key := dbUserKey(id, []byte(":lastextract"))
+		return tx.Set(key, lastExtraction.Marshal())
+	})
+	if err != nil {
+		return nil, errorf(ErrDatabaseError, "%s", err)
+	}
+
 	idKeyBytes, _ := ibe.Extract(st.masterPrivateKey, id[:]).MarshalBinary()
 	publicKey, privateKey, err := box.GenerateKey(rand.Reader)
 	if err != nil {
@@ -198,6 +212,43 @@ func (srv *Server) extract(args *extractArgs) (*extractReply, error) {
 	reply.Sign(srv.privateKey)
 
 	return reply, nil
+}
+
+type lastExtraction struct {
+	Round    uint32
+	UnixTime int64
+}
+
+const lastExtractionBinaryVersion byte = 1
+
+func (e lastExtraction) size() int {
+	return 1 + 4 + 8
+}
+
+func (e lastExtraction) Marshal() []byte {
+	data := make([]byte, e.size())
+	data[0] = lastExtractionBinaryVersion
+	binary.BigEndian.PutUint32(data[1:5], e.Round)
+	binary.BigEndian.PutUint64(data[5:], uint64(e.UnixTime))
+	return data
+}
+
+func (e *lastExtraction) Unmarshal(data []byte) error {
+	if len(data) != e.size() {
+		return errors.New("bad data length: got %d, want %d", len(data), e.size())
+	}
+	if data[0] != lastExtractionBinaryVersion {
+		return errors.New("unexpected binary version: %v", data[0])
+	}
+	e.Round = binary.BigEndian.Uint32(data[1:5])
+	e.UnixTime = int64(binary.BigEndian.Uint64(data[5:]))
+	return nil
+}
+
+var dbUserPrefix = []byte("user:")
+
+func dbUserKey(identity *[64]byte, suffix []byte) []byte {
+	return append(append(dbUserPrefix, identity[:]...), suffix...)
 }
 
 type user struct {

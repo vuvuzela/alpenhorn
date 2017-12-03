@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/dgraph-io/badger"
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/ed25519"
 
@@ -38,6 +39,7 @@ import (
 type Server struct {
 	db       *sql.DB
 	userStmt *sql.Stmt
+	badgerDB *badger.DB
 	log      *log.Logger
 
 	mu     sync.Mutex
@@ -64,6 +66,9 @@ type SendMailHandler func(toUsername string, token []byte) error
 type Config struct {
 	// DBName is the PostgreSQL dbname parameter.
 	DBName string
+
+	// BadgerDBPath is the path to the Badger database.
+	BadgerDBPath string
 
 	// SigningKey is the PKG server's long-term signing key.
 	SigningKey ed25519.PrivateKey
@@ -131,6 +136,15 @@ func NewServer(conf *Config) (*Server, error) {
 		return nil, err
 	}
 
+	opts := badger.DefaultOptions
+	opts.Dir = conf.BadgerDBPath
+	opts.ValueDir = conf.BadgerDBPath
+	opts.SyncWrites = true
+	badgerDB, err := badger.Open(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	logger := conf.Logger
 	if logger == nil {
 		logger = log.StdLogger
@@ -139,6 +153,7 @@ func NewServer(conf *Config) (*Server, error) {
 	s := &Server{
 		db:             db,
 		userStmt:       stmt,
+		badgerDB:       badgerDB,
 		log:            logger,
 		rounds:         make(map[uint32]*roundState),
 		privateKey:     conf.SigningKey,
