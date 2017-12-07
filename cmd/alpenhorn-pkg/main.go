@@ -172,5 +172,8 @@ func checkConfig(conf *Config) error {
 	if !bytes.Equal(expectedPub, conf.PublicKey) {
 		return errors.New("public key does not correspond to private key")
 	}
+	if err := os.MkdirAll(conf.DBPath, 0700); err != nil {
+		return err
+	}
 	return nil
 }
