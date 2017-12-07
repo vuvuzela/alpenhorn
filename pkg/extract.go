@@ -7,7 +7,6 @@ package pkg
 import (
 	"bytes"
 	"crypto/rand"
-	"database/sql"
 	"encoding/binary"
 	"encoding/json"
 	"net/http"
@@ -17,7 +16,6 @@ import (
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/box"
 
-	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/crypto/bls"
 	"vuvuzela.io/crypto/ibe"
@@ -158,31 +156,23 @@ func (srv *Server) extract(args *extractArgs) (*extractReply, error) {
 		)
 	}
 
-	id, err := UsernameToIdentity(args.Username)
-	if err != nil {
-		return nil, errorf(ErrInvalidUsername, "%s", err)
-	}
-
-	user, err := srv.getUser(nil, args.Username)
+	user, id, err := srv.getUser(nil, args.Username)
 	if err != nil {
 		return nil, err
 	}
-	if user == nil {
-		return nil, errorf(ErrNotRegistered, "%q", args.Username)
-	}
-	if user.Status != statusVerified {
+	if !user.Verified {
 		return nil, errorf(ErrNotVerified, "%q", args.Username)
 	}
-	if !args.Verify(user.Key) {
-		return nil, errorf(ErrInvalidSignature, "key=%x", user.Key)
+	if !args.Verify(user.LoginKey) {
+		return nil, errorf(ErrInvalidSignature, "key=%x", user.LoginKey)
 	}
 
 	lastExtraction := lastExtraction{
 		Round:    args.Round,
 		UnixTime: time.Now().Unix(),
 	}
-	err = srv.badgerDB.Update(func(tx *badger.Txn) error {
-		key := dbUserKey(id, []byte(":lastextract"))
+	err = srv.db.Update(func(tx *badger.Txn) error {
+		key := dbUserKey(id, lastExtractionSuffix)
 		return tx.Set(key, lastExtraction.Marshal())
 	})
 	if err != nil {
@@ -214,69 +204,30 @@ func (srv *Server) extract(args *extractArgs) (*extractReply, error) {
 	return reply, nil
 }
 
-type lastExtraction struct {
-	Round    uint32
-	UnixTime int64
-}
-
-const lastExtractionBinaryVersion byte = 1
-
-func (e lastExtraction) size() int {
-	return 1 + 4 + 8
-}
-
-func (e lastExtraction) Marshal() []byte {
-	data := make([]byte, e.size())
-	data[0] = lastExtractionBinaryVersion
-	binary.BigEndian.PutUint32(data[1:5], e.Round)
-	binary.BigEndian.PutUint64(data[5:], uint64(e.UnixTime))
-	return data
-}
-
-func (e *lastExtraction) Unmarshal(data []byte) error {
-	if len(data) != e.size() {
-		return errors.New("bad data length: got %d, want %d", len(data), e.size())
+func (srv *Server) getUser(tx *badger.Txn, username string) (user userState, id *[64]byte, err error) {
+	id, err = UsernameToIdentity(username)
+	if err != nil {
+		return user, id, errorf(ErrInvalidUsername, "%s", err)
 	}
-	if data[0] != lastExtractionBinaryVersion {
-		return errors.New("unexpected binary version: %v", data[0])
-	}
-	e.Round = binary.BigEndian.Uint32(data[1:5])
-	e.UnixTime = int64(binary.BigEndian.Uint64(data[5:]))
-	return nil
-}
 
-var dbUserPrefix = []byte("user:")
-
-func dbUserKey(identity *[64]byte, suffix []byte) []byte {
-	return append(append(dbUserPrefix, identity[:]...), suffix...)
-}
-
-type user struct {
-	Username     string
-	Status       userStatus
-	Key          ed25519.PublicKey
-	Token        []byte
-	TokenExpires *time.Time
-}
-
-func (srv *Server) getUser(tx *sql.Tx, username string) (*user, error) {
-	var stmt *sql.Stmt
 	if tx == nil {
-		stmt = srv.userStmt
-	} else {
-		stmt = tx.Stmt(srv.userStmt)
+		tx = srv.db.NewTransaction(false)
+		defer tx.Discard()
 	}
 
-	u := new(user)
-	var key []byte
-	err := stmt.QueryRow(username).Scan(&u.Username, &u.Status, &key, &u.Token, &u.TokenExpires)
-	u.Key = key
-
-	switch {
-	case err == sql.ErrNoRows:
-		return nil, nil
-	case err != nil:
-		return nil, err
+	item, err := tx.Get(dbUserKey(id, registrationSuffix))
+	if err == badger.ErrKeyNotFound {
+		return user, id, errorf(ErrNotRegistered, "%q", username)
 	}
-	return u, nil
+	if err != nil {
+		return user, id, errorf(ErrDatabaseError, "%s", err)
+	}
+	data, err := item.Value()
+	if err != nil {
+		return user, id, errorf(ErrDatabaseError, "%s", err)
+	}
+	if err := user.Unmarshal(data); err != nil {
+		return user, id, errorf(ErrDatabaseError, "invalid user state: %s", err)
+	}
+	return user, id, nil
 }

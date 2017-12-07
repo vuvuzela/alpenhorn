@@ -6,12 +6,12 @@ package pkg
 
 import (
 	"crypto/rand"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
+	"github.com/dgraph-io/badger"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/log"
@@ -68,75 +68,104 @@ func (srv *Server) register(username string, loginKey ed25519.PublicKey) error {
 		return errorf(ErrInvalidLoginKey, "got %d bytes, want %d bytes", len(loginKey), ed25519.PublicKeySize)
 	}
 
-	tx, err := srv.db.Begin()
-	if err != nil {
-		return err
+	if srv.sendVerificationEmail == nil {
+		return srv.registerFCFS(username, loginKey)
 	}
-	defer tx.Rollback()
 
-	var status userStatus
-	tokenExpires := new(time.Time)
-	row := tx.QueryRow("SELECT status, tokenExpires FROM users WHERE username=$1", username)
-	err = row.Scan(&status, &tokenExpires)
-	switch {
-	case err == nil && status == statusVerified:
+	return srv.registerWithVerification(username, loginKey)
+}
+
+func (srv *Server) registerFCFS(username string, loginKey ed25519.PublicKey) error {
+	id := ValidUsernameToIdentity(username)
+
+	tx := srv.db.NewTransaction(true)
+	defer tx.Discard()
+
+	key := dbUserKey(id, registrationSuffix)
+	_, err := tx.Get(key)
+	if err != nil && err != badger.ErrKeyNotFound {
+		return errorf(ErrDatabaseError, "%s", err)
+	}
+	if err == nil {
 		return errorf(ErrAlreadyRegistered, "%q", username)
-	case err == nil && status == statusPending:
-		// XXX tokenExpires shouldn't be null
-		if time.Now().Before(*tokenExpires) {
-			return errorf(ErrRegistrationInProgress, "try again later")
-		}
+	}
 
-		token := make([]byte, 32)
-		rand.Read(token)
-		expires := time.Now().Add(24 * time.Hour)
-		_, err := tx.Exec(
-			"UPDATE users SET token=$1, tokenExpires=$2 WHERE username=$3",
-			token, expires, username,
-		)
-		if err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		if err := srv.sendVerificationEmail(username, token); err != nil {
-			return errorf(ErrSendingEmail, "%s", err)
-		}
-		return nil
-	case err == sql.ErrNoRows && srv.sendVerificationEmail == nil:
-		_, err := tx.Exec(
-			"INSERT INTO users (username, status, key) VALUES($1, $2, $3)",
-			username, statusVerified, []byte(loginKey),
-		)
-		if err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		return nil
-	case err == sql.ErrNoRows && srv.sendVerificationEmail != nil:
-		token := make([]byte, 32)
-		rand.Read(token)
-		expires := time.Now().Add(24 * time.Hour)
-		_, err := tx.Exec(
-			"INSERT INTO users (username, status, key, token, tokenExpires) VALUES($1, $2, $3, $4, $5)",
-			username, statusPending, []byte(loginKey), token, expires,
-		)
-		if err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		if err := srv.sendVerificationEmail(username, token); err != nil {
-			return errorf(ErrSendingEmail, "%s", err)
-		}
-		return nil
-	case err != nil:
-		return err
+	newUser := userState{
+		Verified: true,
+		LoginKey: loginKey,
+	}
+
+	err = tx.Set(key, newUser.Marshal())
+	if err != nil {
+		return errorf(ErrDatabaseError, "%s", err)
+	}
+
+	err = tx.Commit(nil)
+	if err != nil {
+		return errorf(ErrDatabaseError, "%s", err)
 	}
 
 	return nil
+}
+
+func (srv *Server) registerWithVerification(username string, loginKey ed25519.PublicKey) error {
+	id := ValidUsernameToIdentity(username)
+
+	tx := srv.db.NewTransaction(true)
+	defer tx.Discard()
+
+	key := dbUserKey(id, registrationSuffix)
+	item, err := tx.Get(key)
+	if err != nil && err != badger.ErrKeyNotFound {
+		return errorf(ErrDatabaseError, "%s", err)
+	} else if err == nil {
+		// User already exists; check if verified or expired.
+		data, err := item.Value()
+		if err != nil {
+			return errorf(ErrDatabaseError, "%s", err)
+		}
+		var user userState
+		err = user.Unmarshal(data)
+		if err != nil {
+			return errorf(ErrDatabaseError, "invalid user state: %s", err)
+		}
+		if user.Verified {
+			return errorf(ErrAlreadyRegistered, "%q", username)
+		}
+		if time.Now().Before(time.Unix(user.TokenExpires, 0)) {
+			return errorf(ErrRegistrationInProgress, "try again later")
+		}
+	}
+
+	newUser := userState{
+		Verified:          false,
+		LoginKey:          loginKey,
+		VerificationToken: newVerificationToken(),
+		TokenExpires:      time.Now().Add(24 * time.Hour).Unix(),
+	}
+
+	err = tx.Set(key, newUser.Marshal())
+	if err != nil {
+		return errorf(ErrDatabaseError, "%s", err)
+	}
+	// Write changes to disk before sending the email.
+	if err := tx.Commit(nil); err != nil {
+		return errorf(ErrDatabaseError, "%s", err)
+	}
+
+	err = srv.sendVerificationEmail(username, newUser.VerificationToken[:])
+	if err != nil {
+		return errorf(ErrSendingEmail, "%s", err)
+	}
+
+	return nil
+}
+
+func newVerificationToken() *[32]byte {
+	token := new([32]byte)
+	_, err := rand.Read(token[:])
+	if err != nil {
+		panic(err)
+	}
+	return token
 }

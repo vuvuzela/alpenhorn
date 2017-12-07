@@ -70,44 +70,38 @@ func (srv *Server) verifyHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 func (srv *Server) verify(args *verifyArgs) error {
-	if err := ValidateUsername(args.Username); err != nil {
-		return errorf(ErrInvalidUsername, "%s", err)
-	}
+	tx := srv.db.NewTransaction(true)
+	defer tx.Discard()
 
-	tx, err := srv.db.Begin()
+	user, id, err := srv.getUser(tx, args.Username)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-
-	user, err := srv.getUser(tx, args.Username)
-	if err != nil {
-		return err
-	}
-	if user == nil {
-		return errorf(ErrNotRegistered, "%q", args.Username)
-	}
-	if user.Status != statusPending {
+	if user.Verified {
 		return errorf(ErrAlreadyRegistered, "%q", args.Username)
 	}
 
-	if !time.Now().Before(*user.TokenExpires) {
-		return errorf(ErrExpiredToken, "expired %s", *user.TokenExpires)
+	tokenExpires := time.Unix(user.TokenExpires, 0)
+	if !time.Now().Before(tokenExpires) {
+		return errorf(ErrExpiredToken, "registration token expired")
 	}
-	if subtle.ConstantTimeCompare(args.Token, user.Token) != 1 {
+	if subtle.ConstantTimeCompare(args.Token, user.VerificationToken[:]) != 1 {
 		return errorf(ErrInvalidToken, "%x", args.Token)
 	}
-	if !args.Verify(user.Key) {
-		return errorf(ErrInvalidSignature, "key=%x", user.Key)
+	if !args.Verify(user.LoginKey) {
+		return errorf(ErrInvalidSignature, "key=%x", user.LoginKey)
 	}
 
-	_, err = tx.Exec(
-		"UPDATE users SET status=$1, token=null, tokenExpires=null WHERE username=$2",
-		statusVerified, args.Username,
-	)
+	user.Verified = true
+	user.VerificationToken = nil
+	err = tx.Set(dbUserKey(id, registrationSuffix), user.Marshal())
 	if err != nil {
-		return err
+		return errorf(ErrDatabaseError, "%s", err)
 	}
 
-	return tx.Commit()
+	err = tx.Commit(nil)
+	if err != nil {
+		return errorf(ErrDatabaseError, "%s", err)
+	}
+	return nil
 }

@@ -14,7 +14,6 @@ import (
 	"text/template"
 	"time"
 
-	_ "github.com/lib/pq"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/edtls"
@@ -127,8 +126,7 @@ func main() {
 	}
 
 	pkgConfig := &pkg.Config{
-		DBName:         conf.DBName,
-		BadgerDBPath:   conf.DBPath,
+		DBPath:         conf.DBPath,
 		SigningKey:     conf.PrivateKey,
 		CoordinatorKey: conf.CoordinatorKey,
 

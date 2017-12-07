@@ -10,18 +10,15 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha512"
-	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/dgraph-io/badger"
-	_ "github.com/lib/pq"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/edhttp"
@@ -37,10 +34,8 @@ import (
 
 // A Server is a Private Key Generator (PKG).
 type Server struct {
-	db       *sql.DB
-	userStmt *sql.Stmt
-	badgerDB *badger.DB
-	log      *log.Logger
+	db  *badger.DB
+	log *log.Logger
 
 	mu     sync.Mutex
 	rounds map[uint32]*roundState
@@ -64,11 +59,8 @@ type SendMailHandler func(toUsername string, token []byte) error
 
 // A Config is used to configure a PKG server.
 type Config struct {
-	// DBName is the PostgreSQL dbname parameter.
-	DBName string
-
-	// BadgerDBPath is the path to the Badger database.
-	BadgerDBPath string
+	// DBPath is the path to the Badger database.
+	DBPath string
 
 	// SigningKey is the PKG server's long-term signing key.
 	SigningKey ed25519.PrivateKey
@@ -90,57 +82,13 @@ type Config struct {
 	SendVerificationEmail SendMailHandler
 }
 
-// The PKG does not yet use the userlog table.
-const schema string = `
-CREATE TABLE IF NOT EXISTS users (
-  id SERIAL PRIMARY KEY,
-  username VARCHAR(255) UNIQUE,
-  status INTEGER,
-  key BYTEA,
-  token BYTEA,
-  tokenExpires TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS userlog (
-  id SERIAL PRIMARY KEY,
-  time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  username VARCHAR(255),
-  type INTEGER,
-  extra BYTEA
-);
-`
-
-const userQuery = "SELECT username, status, key, token, tokenExpires FROM users WHERE username=$1"
-
 func NewServer(conf *Config) (*Server, error) {
-	connstr := fmt.Sprintf("host=/var/run/postgresql dbname=%s", conf.DBName)
-	db, err := sql.Open("postgres", connstr)
-	if err != nil {
-		return nil, errors.Wrap(err, "sql.Open")
-	}
-	if err := db.Ping(); err != nil {
-		return nil, errors.Wrap(err, "sql.Ping")
-	}
-	// avoid "too many clients" errors
-	db.SetMaxOpenConns(90)
-	// avoid "cannot assign requested address" errors
-	db.SetMaxIdleConns(5)
-
-	_, err = db.Exec(schema)
-	if err != nil {
-		return nil, errors.Wrap(err, "sql exec schema")
-	}
-
-	stmt, err := db.Prepare(userQuery)
-	if err != nil {
-		return nil, err
-	}
-
 	opts := badger.DefaultOptions
-	opts.Dir = conf.BadgerDBPath
-	opts.ValueDir = conf.BadgerDBPath
+	opts.Dir = conf.DBPath
+	opts.ValueDir = conf.DBPath
 	opts.SyncWrites = true
-	badgerDB, err := badger.Open(opts)
+
+	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -152,8 +100,6 @@ func NewServer(conf *Config) (*Server, error) {
 
 	s := &Server{
 		db:             db,
-		userStmt:       stmt,
-		badgerDB:       badgerDB,
 		log:            logger,
 		rounds:         make(map[uint32]*roundState),
 		privateKey:     conf.SigningKey,

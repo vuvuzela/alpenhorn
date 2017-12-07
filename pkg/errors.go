@@ -8,8 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-
-	"github.com/lib/pq"
 )
 
 //go:generate stringer -type=ErrorCode
@@ -72,8 +70,6 @@ func errorCode(err error) ErrorCode {
 	switch err := err.(type) {
 	case Error:
 		return err.Code
-	case *pq.Error:
-		return ErrDatabaseError
 	default:
 		return ErrUnknown
 	}

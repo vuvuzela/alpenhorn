@@ -7,27 +7,32 @@ package pkg
 import (
 	"crypto/rand"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"testing"
 
 	"golang.org/x/crypto/ed25519"
 
-	"vuvuzela.io/alpenhorn/internal/pg"
 	"vuvuzela.io/alpenhorn/log"
 )
 
 func BenchmarkRegister(b *testing.B) {
-	pg.Createdb("benchmark_register")
-	defer pg.Dropdb("benchmark_register")
-
 	_, serverPriv, _ := ed25519.GenerateKey(rand.Reader)
+	dbPath, err := ioutil.TempDir("", "alpenhorn_pkg_db_")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer os.RemoveAll(dbPath)
+
 	conf := &Config{
-		DBName: "benchmark_register",
+		DBPath: dbPath,
 		Logger: &log.Logger{
 			Level:        log.ErrorLevel,
 			EntryHandler: log.OutputText(log.Stderr),
 		},
 		SigningKey: serverPriv,
 	}
+
 	srv, err := NewServer(conf)
 	if err != nil {
 		b.Fatal(err)

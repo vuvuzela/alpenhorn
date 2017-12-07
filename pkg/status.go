@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"golang.org/x/crypto/ed25519"
+
 	"vuvuzela.io/alpenhorn/log"
 )
 
@@ -64,23 +65,15 @@ func (srv *Server) statusHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 func (srv *Server) checkStatus(args *statusArgs) (*statusReply, error) {
-	_, err := UsernameToIdentity(args.Username)
-	if err != nil {
-		return nil, errorf(ErrInvalidUsername, "%s", err)
-	}
-
-	user, err := srv.getUser(nil, args.Username)
+	user, _, err := srv.getUser(nil, args.Username)
 	if err != nil {
 		return nil, err
 	}
-	if user == nil {
-		return nil, errorf(ErrNotRegistered, "%q", args.Username)
-	}
-	if user.Status != statusVerified {
+	if !user.Verified {
 		return nil, errorf(ErrNotVerified, "%q", args.Username)
 	}
 
-	if !ed25519.Verify(user.Key, args.msg(), args.Signature) {
+	if !ed25519.Verify(user.LoginKey, args.msg(), args.Signature) {
 		return nil, errorf(ErrInvalidSignature, "")
 	}
 

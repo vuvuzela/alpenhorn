@@ -5,7 +5,6 @@
 package mock
 
 import (
-	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -14,7 +13,6 @@ import (
 
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/errors"
-	"vuvuzela.io/alpenhorn/internal/pg"
 	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/crypto/rand"
@@ -23,18 +21,15 @@ import (
 type PKG struct {
 	pkg.PublicServerConfig
 
-	dbName     string
+	dbPath     string
 	pkgServer  *pkg.Server
 	httpServer *http.Server
-
-	badgerDBPath string
 }
 
 func (p *PKG) Close() error {
 	err1 := p.httpServer.Close()
 	err2 := p.pkgServer.Close()
-	err3 := os.RemoveAll(p.badgerDBPath)
-	pg.Dropdb(p.dbName)
+	err3 := os.RemoveAll(p.dbPath)
 	return firstError(err1, err2, err3)
 }
 
@@ -56,20 +51,14 @@ func LaunchPKG(coordinatorKey ed25519.PublicKey, sendMail pkg.SendMailHandler) (
 	}
 	addr := listener.Addr().String()
 
-	id := make([]byte, 8)
-	rand.Read(id)
-	dbName := fmt.Sprintf("alpenhorn_mock_pkg_%x", id)
-	pg.Createdb(dbName)
-
-	badgerDir, err := ioutil.TempDir("", "alpenhorn_pkg_badger_")
+	dbPath, err := ioutil.TempDir("", "alpenhorn_mock_pkg_")
 	if err != nil {
 		return nil, err
 	}
 
 	config := &pkg.Config{
-		SigningKey:   privateKey,
-		DBName:       dbName,
-		BadgerDBPath: badgerDir,
+		SigningKey: privateKey,
+		DBPath:     dbPath,
 		Logger: &log.Logger{
 			Level:        log.ErrorLevel,
 			EntryHandler: log.OutputText(log.Stderr),
@@ -99,10 +88,8 @@ func LaunchPKG(coordinatorKey ed25519.PublicKey, sendMail pkg.SendMailHandler) (
 			Address: addr,
 		},
 
-		dbName:     dbName,
+		dbPath:     config.DBPath,
 		pkgServer:  pkgServer,
 		httpServer: httpServer,
-
-		badgerDBPath: badgerDir,
 	}, nil
 }
