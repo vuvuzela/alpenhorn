@@ -52,14 +52,6 @@ func (srv *Server) registerHandler(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte("\"OK\""))
 }
 
-type userStatus int
-
-const (
-	statusExpired userStatus = iota
-	statusPending
-	statusVerified
-)
-
 func (srv *Server) register(username string, loginKey ed25519.PublicKey) error {
 	if err := ValidateUsername(username); err != nil {
 		return errorf(ErrInvalidUsername, "%s", err)
