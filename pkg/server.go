@@ -441,7 +441,7 @@ func ValidateUsername(username string) error {
 			return errors.New("username must be lowercase: %s", username)
 		}
 		if !validChar(c) {
-			return errors.New("invalid character in username: %s", c)
+			return errors.New("invalid character in username: %c", c)
 		}
 	}
 	return nil
