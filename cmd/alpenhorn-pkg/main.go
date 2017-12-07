@@ -144,7 +144,7 @@ func main() {
 	httpServer := &http.Server{
 		Handler:      pkgServer,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
 
 	// Let the user know what's happening before switching the logger.
