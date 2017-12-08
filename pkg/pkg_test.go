@@ -19,6 +19,7 @@ import (
 
 	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/internal/mock"
+	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/crypto/ibe"
 )
@@ -204,7 +205,7 @@ func TestManyClients(t *testing.T) {
 				client := clients[thread*usersPerThread+i]
 				err := client.Register(testpkg.PublicServerConfig)
 				if err != nil {
-					t.Fatalf("client register: %s", err)
+					log.Panicf("client register: %s", err)
 				}
 			}
 			wg.Done()
