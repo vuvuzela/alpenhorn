@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/dgraph-io/badger"
@@ -432,10 +431,6 @@ func ValidateUsername(username string) error {
 	if len(username) > 64 {
 		return errors.New("username must be 64 characters or less: %s", username)
 	}
-	parts := strings.Split(username, "@")
-	if len(parts) != 2 || len(parts[0]) == 0 || len(parts[1]) == 0 {
-		return errors.New("username must be a valid email address: %s", username)
-	}
 	for _, c := range username {
 		if c >= 'A' && c <= 'Z' {
 			return errors.New("username must be lowercase: %s", username)
@@ -469,9 +464,6 @@ func validChar(c rune) bool {
 		return true
 	}
 	if c >= '0' && c <= '9' {
-		return true
-	}
-	if c == '.' || c == '-' || c == '_' || c == '\'' || c == '@' {
 		return true
 	}
 	return false

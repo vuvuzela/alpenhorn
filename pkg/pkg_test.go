@@ -53,7 +53,7 @@ func TestSingleClient(t *testing.T) {
 
 	alicePub, alicePriv, _ := ed25519.GenerateKey(rand.Reader)
 	client := &pkg.Client{
-		Username:        "alice@example.org",
+		Username:        "alice",
 		LoginKey:        alicePriv,
 		UserLongTermKey: alicePub,
 		HTTPClient:      new(edhttp.Client),
@@ -128,7 +128,7 @@ func TestSingleClient(t *testing.T) {
 	}
 
 	masterKey := revealReply.MasterPublicKey
-	aliceID, _ := pkg.UsernameToIdentity("alice@example.org")
+	aliceID, _ := pkg.UsernameToIdentity("alice")
 	encintro := ibe.Encrypt(rand.Reader, masterKey, aliceID[:], []byte("Hello Alice!"))
 	intro, ok := ibe.Decrypt(result1.PrivateKey, encintro)
 	if !ok {
@@ -145,7 +145,7 @@ func TestRegisterFirstComeFirstServe(t *testing.T) {
 
 	alicePub, alicePriv, _ := ed25519.GenerateKey(rand.Reader)
 	client := &pkg.Client{
-		Username:        "alice@example.org",
+		Username:        "alice",
 		LoginKey:        alicePriv,
 		UserLongTermKey: alicePub,
 		HTTPClient:      new(edhttp.Client),
@@ -188,7 +188,7 @@ func TestManyClients(t *testing.T) {
 		for i := 0; i < usersPerThread; i++ {
 			userPub, userPriv, _ := ed25519.GenerateKey(rand.Reader)
 			clients[thread*usersPerThread+i] = &pkg.Client{
-				Username:        fmt.Sprintf("%d@thread%d", i, thread),
+				Username:        fmt.Sprintf("%dthread%d", i, thread),
 				LoginKey:        userPriv,
 				UserLongTermKey: userPub,
 				HTTPClient:      new(edhttp.Client),
