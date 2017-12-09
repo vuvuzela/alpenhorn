@@ -402,7 +402,7 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	friend.Call(2)
 	outCall = <-alice.Handler.(*chanHandler).sentCall
 	if outCall.Intent() != 2 {
-		t.Fatalf("wrong intent: got %d, want %d", outCall.Intent, 2)
+		t.Fatalf("wrong intent: got %d, want %d", outCall.Intent(), 2)
 	}
 	log.Infof("Alice: calling Bob with intent 2")
 
