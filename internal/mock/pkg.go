@@ -19,16 +19,16 @@ import (
 )
 
 type PKG struct {
+	PKGServer *pkg.Server
 	pkg.PublicServerConfig
 
 	dbPath     string
-	pkgServer  *pkg.Server
 	httpServer *http.Server
 }
 
 func (p *PKG) Close() error {
 	err1 := p.httpServer.Close()
-	err2 := p.pkgServer.Close()
+	err2 := p.PKGServer.Close()
 	err3 := os.RemoveAll(p.dbPath)
 	return firstError(err1, err2, err3)
 }
@@ -83,13 +83,14 @@ func LaunchPKG(coordinatorKey ed25519.PublicKey, sendMail pkg.SendMailHandler) (
 	}()
 
 	return &PKG{
+		PKGServer: pkgServer,
+
 		PublicServerConfig: pkg.PublicServerConfig{
 			Key:     publicKey,
 			Address: addr,
 		},
 
 		dbPath:     config.DBPath,
-		pkgServer:  pkgServer,
 		httpServer: httpServer,
 	}, nil
 }

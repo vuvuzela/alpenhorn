@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/edhttp"
@@ -96,6 +97,25 @@ func TestSingleClient(t *testing.T) {
 
 	err = client.CheckStatus(testpkg.PublicServerConfig)
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	aliceLog, err := testpkg.PKGServer.GetUserLog(pkg.ValidUsernameToIdentity("alice"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(aliceLog) != 1 {
+		t.Fatalf("unexpected user log: %#v", aliceLog)
+	}
+	if aliceLog[0].Type != pkg.EventRegistered {
+		t.Fatalf("unexpected user log: %#v", aliceLog)
+	}
+	if !bytes.Equal(aliceLog[0].LoginKey, alicePub) {
+		t.Fatalf("unexpected user log: %#v", aliceLog)
+	}
+
+	_, err = testpkg.PKGServer.GetUserLog(pkg.ValidUsernameToIdentity("nonexistent"))
+	if err != badger.ErrKeyNotFound {
 		t.Fatal(err)
 	}
 

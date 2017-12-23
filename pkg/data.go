@@ -6,7 +6,10 @@ package pkg
 
 import (
 	"encoding/binary"
+	"encoding/json"
+	"time"
 
+	"github.com/dgraph-io/badger"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/errors"
@@ -16,6 +19,7 @@ var (
 	dbUserPrefix         = []byte("user:")
 	registrationSuffix   = []byte(":registration")
 	lastExtractionSuffix = []byte(":lastextract")
+	userLogSuffix        = []byte(":log")
 )
 
 func dbUserKey(identity *[64]byte, suffix []byte) []byte {
@@ -117,4 +121,82 @@ func (e *lastExtraction) Unmarshal(data []byte) error {
 	e.Round = binary.BigEndian.Uint32(data[1:5])
 	e.UnixTime = int64(binary.BigEndian.Uint64(data[5:]))
 	return nil
+}
+
+// A UserEventLog contains the major updates to a user's account.
+type UserEventLog []UserEvent
+
+const userEventLogBinaryVersion byte = 1
+
+type UserEventType int
+
+const (
+	EventRegistered UserEventType = iota + 1
+)
+
+type UserEvent struct {
+	Time     time.Time
+	Type     UserEventType
+	LoginKey ed25519.PublicKey
+}
+
+func (e UserEventLog) Marshal() []byte {
+	data, err := json.Marshal(e)
+	if err != nil {
+		panic(err)
+	}
+	return append([]byte{userEventLogBinaryVersion}, data...)
+}
+
+func (e *UserEventLog) Unmarshal(data []byte) error {
+	if len(data) < 3 {
+		return errors.New("short data")
+	}
+	if data[0] != userEventLogBinaryVersion {
+		return errors.New("userEventLogBinaryVersion mismatch: got %v, want %v", data[0], userEventLogBinaryVersion)
+	}
+	return json.Unmarshal(data[1:], e)
+}
+
+func appendLog(tx *badger.Txn, identity *[64]byte, event UserEvent) error {
+	logKey := dbUserKey(identity, userLogSuffix)
+	item, err := tx.Get(logKey)
+	var currLog UserEventLog
+	if err == badger.ErrKeyNotFound {
+		currLog = nil
+	} else if err != nil {
+		return errorf(ErrDatabaseError, "%s", err)
+	} else {
+		data, err := item.Value()
+		if err != nil {
+			return errorf(ErrDatabaseError, "%s", err)
+		}
+		err = json.Unmarshal(data, currLog)
+		if err != nil {
+			return errorf(ErrDatabaseError, "invalid user log: %s", err)
+		}
+	}
+
+	currLog = append(currLog, event)
+	data := currLog.Marshal()
+	if err := tx.Set(logKey, data); err != nil {
+		return errorf(ErrDatabaseError, "%s", err)
+	}
+	return nil
+}
+
+func (srv *Server) GetUserLog(identity *[64]byte) (UserEventLog, error) {
+	var log UserEventLog
+	err := srv.db.View(func(tx *badger.Txn) error {
+		item, err := tx.Get(dbUserKey(identity, userLogSuffix))
+		if err != nil {
+			return err
+		}
+		data, err := item.Value()
+		if err != nil {
+			return err
+		}
+		return log.Unmarshal(data)
+	})
+	return log, err
 }

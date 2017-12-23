@@ -99,6 +99,15 @@ func (srv *Server) verify(args *verifyArgs) error {
 		return errorf(ErrDatabaseError, "%s", err)
 	}
 
+	err = appendLog(tx, id, UserEvent{
+		Time:     time.Now(),
+		Type:     EventRegistered,
+		LoginKey: user.LoginKey,
+	})
+	if err != nil {
+		return err
+	}
+
 	err = tx.Commit(nil)
 	if err != nil {
 		return errorf(ErrDatabaseError, "%s", err)

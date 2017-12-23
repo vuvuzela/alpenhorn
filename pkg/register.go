@@ -92,6 +92,15 @@ func (srv *Server) registerFCFS(username string, loginKey ed25519.PublicKey) err
 		return errorf(ErrDatabaseError, "%s", err)
 	}
 
+	err = appendLog(tx, id, UserEvent{
+		Time:     time.Now(),
+		Type:     EventRegistered,
+		LoginKey: loginKey,
+	})
+	if err != nil {
+		return err
+	}
+
 	err = tx.Commit(nil)
 	if err != nil {
 		return errorf(ErrDatabaseError, "%s", err)
