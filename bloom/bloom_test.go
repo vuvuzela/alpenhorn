@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"encoding/binary"
+	"encoding/json"
 	"log"
 	"math"
 	"testing"
@@ -133,6 +134,32 @@ func TestIncompressible(t *testing.T) {
 	w.Close()
 	if compressed.Len() < len(filterBytes)*99/100 {
 		t.Fatalf("Compressed %d -> %d", len(filterBytes), compressed.Len())
+	}
+}
+
+func TestMarshalJSON(t *testing.T) {
+	filter := New(1000, 6)
+	filter.Set([]byte("hello"))
+	data, err := json.Marshal(filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	filter2 := new(Filter)
+	err = json.Unmarshal(data, filter2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !filter2.Test([]byte("hello")) {
+		t.Fatal("item not in filter")
+	}
+
+	if filter.numHashes != filter2.numHashes {
+		t.Fatalf("numHashes differ: %d != %d", filter.numHashes, filter2.numHashes)
+	}
+	if !bytes.Equal(filter.data, filter2.data) {
+		t.Fatalf("filter bytes differ")
 	}
 }
 

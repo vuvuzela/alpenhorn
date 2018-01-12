@@ -7,6 +7,7 @@ package bloom
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"math"
 
@@ -81,6 +82,22 @@ func (f *Filter) UnmarshalBinary(data []byte) error {
 	f.numHashes = int(binary.BigEndian.Uint32(data[0:4]))
 	f.data = data[4:]
 	return nil
+}
+
+func (f *Filter) MarshalJSON() ([]byte, error) {
+	data, err := f.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(data)
+}
+
+func (f *Filter) UnmarshalJSON(data []byte) error {
+	var bs []byte
+	if err := json.Unmarshal(data, &bs); err != nil {
+		return err
+	}
+	return f.UnmarshalBinary(bs)
 }
 
 // Previously, we used the hashing method described in this paper:
