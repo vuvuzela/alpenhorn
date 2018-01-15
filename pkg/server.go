@@ -129,6 +129,8 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		srv.commitHandler(w, r)
 	case "/reveal":
 		srv.revealHandler(w, r)
+	case "/userfilter":
+		srv.userFilterHandler(w, r)
 	default:
 		http.NotFound(w, r)
 	}

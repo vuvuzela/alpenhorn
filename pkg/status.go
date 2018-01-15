@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/dgraph-io/badger"
 	"golang.org/x/crypto/ed25519"
 
+	"vuvuzela.io/alpenhorn/bloom"
 	"vuvuzela.io/alpenhorn/log"
 )
 
@@ -78,4 +80,46 @@ func (srv *Server) checkStatus(args *statusArgs) (*statusReply, error) {
 	}
 
 	return &statusReply{}, nil
+}
+
+func (srv *Server) RegisteredUsernames() ([]*[64]byte, error) {
+	users := make([]*[64]byte, 0, 32)
+	err := srv.db.View(func(tx *badger.Txn) error {
+		opt := badger.DefaultIteratorOptions
+		it := tx.NewIterator(opt)
+		for it.Seek(dbUserPrefix); it.ValidForPrefix(dbUserPrefix); it.Next() {
+			key := it.Item().Key()
+			if !bytes.HasSuffix(key, registrationSuffix) {
+				continue
+			}
+			userID := bytes.TrimSuffix(bytes.TrimPrefix(key, dbUserPrefix), registrationSuffix)
+			clone := new([64]byte)
+			copy(clone[:], userID)
+			users = append(users, clone)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+func (srv *Server) userFilterHandler(w http.ResponseWriter, req *http.Request) {
+	// TODO add some authentication
+	usernames, err := srv.RegisteredUsernames()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Leave some room in the bloom filter so the registrar can add its own usernames.
+	f := bloom.New(bloom.Optimal(len(usernames)+1000, 0.0001))
+	for _, username := range usernames {
+		f.Set(username[:])
+	}
+	data, err := json.Marshal(f)
+	if err != nil {
+		panic(err)
+	}
+	w.Write(data)
 }

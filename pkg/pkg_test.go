@@ -119,6 +119,14 @@ func TestSingleClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	usernames, err := testpkg.PKGServer.RegisteredUsernames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !(len(usernames) == 1 && bytes.Equal(usernames[0][:], pkg.ValidUsernameToIdentity("alice")[:])) {
+		t.Fatalf("unexpected registered usernames: %v", usernames)
+	}
+
 	pkgs := []pkg.PublicServerConfig{testpkg.PublicServerConfig}
 	pkgSettings, err := coordinatorClient.NewRound(pkgs, 42)
 	if err != nil {
@@ -233,10 +241,19 @@ func TestManyClients(t *testing.T) {
 	}
 	wg.Wait()
 	end := time.Now()
-	t.Logf("Registered %d users in %s", numThreads*usersPerThread, end.Sub(start))
+	totalUsers := numThreads * usersPerThread
+	t.Logf("Registered %d users in %s", totalUsers, end.Sub(start))
+
+	usernames, err := testpkg.PKGServer.RegisteredUsernames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(usernames) != totalUsers {
+		t.Fatalf("unexpected number of registered users: got %d, want %d", len(usernames), totalUsers)
+	}
 
 	pkgs := []pkg.PublicServerConfig{testpkg.PublicServerConfig}
-	_, err := coordinatorClient.NewRound(pkgs, 42)
+	_, err = coordinatorClient.NewRound(pkgs, 42)
 	if err != nil {
 		t.Fatal(err)
 	}
