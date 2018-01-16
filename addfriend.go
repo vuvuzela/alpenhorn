@@ -124,12 +124,7 @@ func (c *Client) loadAddFriendConfig(newConfig *config.SignedConfig) *config.Add
 
 		pkgErr, ok := err.(pkg.Error)
 		if ok && pkgErr.Code == pkg.ErrNotRegistered {
-			err := pkgClient.Register(pkgServer)
-			if err != nil {
-				c.Handler.Error(errors.Wrap(err, "failed to register with PKG %s", pkgServer.Address))
-				continue
-			}
-			log.Infof("Registered %q with new PKG %s", c.Username, pkgServer.Address)
+			log.Infof("Username %q not registered with PKG %s", c.Username, pkgServer.Address)
 		} else {
 			c.Handler.Error(errors.Wrap(err, "failed to check account status with PKG %s", pkgServer.Address))
 		}

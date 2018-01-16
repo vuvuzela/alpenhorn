@@ -4,9 +4,9 @@ package pkg
 
 import "fmt"
 
-const _ErrorCode_name = "ErrBadRequestJSONErrDatabaseErrorErrInvalidUsernameErrInvalidLoginKeyErrNotRegisteredErrNotVerifiedErrAlreadyRegisteredErrRegistrationInProgressErrSendingEmailErrRoundNotFoundErrInvalidUserLongTermKeyErrInvalidSignatureErrInvalidTokenErrExpiredTokenErrUnauthorizedErrBadCommitmentErrUnknown"
+const _ErrorCode_name = "ErrBadRequestJSONErrDatabaseErrorErrInvalidUsernameErrInvalidLoginKeyErrNotRegisteredErrAlreadyRegisteredErrRoundNotFoundErrInvalidUserLongTermKeyErrInvalidSignatureErrInvalidTokenErrExpiredTokenErrUnauthorizedErrBadCommitmentErrUnknown"
 
-var _ErrorCode_index = [...]uint16{0, 17, 33, 51, 69, 85, 99, 119, 144, 159, 175, 200, 219, 234, 249, 264, 280, 290}
+var _ErrorCode_index = [...]uint8{0, 17, 33, 51, 69, 85, 105, 121, 146, 165, 180, 195, 210, 226, 236}
 
 func (i ErrorCode) String() string {
 	i -= 1

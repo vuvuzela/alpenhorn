@@ -127,7 +127,7 @@ func (c *Client) init() {
 }
 
 // Register registers the username with the given PKG.
-func (c *Client) Register(server pkg.PublicServerConfig) error {
+func (c *Client) Register(server pkg.PublicServerConfig, token string) error {
 	c.init()
 
 	pkgc := &pkg.Client{
@@ -136,7 +136,7 @@ func (c *Client) Register(server pkg.PublicServerConfig) error {
 		UserLongTermKey: c.LongTermPublicKey,
 		HTTPClient:      c.edhttpClient,
 	}
-	err := pkgc.Register(server)
+	err := pkgc.Register(server, token)
 	if err != nil {
 		return err
 	}

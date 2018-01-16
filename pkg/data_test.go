@@ -17,7 +17,6 @@ func TestMarshalUserState(t *testing.T) {
 	publicKey, _, _ := ed25519.GenerateKey(rand.Reader)
 
 	verifiedUser := userState{
-		Verified: true,
 		LoginKey: publicKey,
 	}
 	data := verifiedUser.Marshal()
@@ -28,23 +27,6 @@ func TestMarshalUserState(t *testing.T) {
 	}
 	if !reflect.DeepEqual(verifiedUser, verifiedUser2) {
 		t.Fatalf("got %#v, want %#v", verifiedUser2, verifiedUser)
-	}
-
-	unverifiedUser := userState{
-		Verified:          false,
-		LoginKey:          publicKey,
-		TokenExpires:      time.Now().Unix(),
-		VerificationToken: new([32]byte),
-	}
-	rand.Read(unverifiedUser.VerificationToken[:])
-	data = unverifiedUser.Marshal()
-
-	var unverifiedUser2 userState
-	if err := unverifiedUser2.Unmarshal(data); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(unverifiedUser, unverifiedUser2) {
-		t.Fatalf("got %#v, want %#v", unverifiedUser2, unverifiedUser)
 	}
 }
 

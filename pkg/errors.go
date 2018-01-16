@@ -19,10 +19,7 @@ const (
 	ErrInvalidUsername
 	ErrInvalidLoginKey
 	ErrNotRegistered
-	ErrNotVerified
 	ErrAlreadyRegistered
-	ErrRegistrationInProgress
-	ErrSendingEmail
 	ErrRoundNotFound
 	ErrInvalidUserLongTermKey
 	ErrInvalidSignature
@@ -40,10 +37,7 @@ var errText = map[ErrorCode]string{
 	ErrInvalidUsername:        "invalid username",
 	ErrInvalidLoginKey:        "invalid login key",
 	ErrNotRegistered:          "username not registered",
-	ErrNotVerified:            "username not verified",
 	ErrAlreadyRegistered:      "username already registered",
-	ErrRegistrationInProgress: "registration in progress",
-	ErrSendingEmail:           "error sending verification email",
 	ErrRoundNotFound:          "round not found",
 	ErrInvalidUserLongTermKey: "invalid user long term key",
 	ErrInvalidSignature:       "invalid signature",
@@ -57,7 +51,7 @@ var errText = map[ErrorCode]string{
 
 func (e ErrorCode) httpCode() int {
 	switch e {
-	case ErrDatabaseError, ErrSendingEmail, ErrUnknown:
+	case ErrDatabaseError, ErrUnknown:
 		return http.StatusInternalServerError
 	case ErrUnauthorized:
 		return http.StatusUnauthorized
@@ -77,7 +71,7 @@ func errorCode(err error) ErrorCode {
 
 func isInternalError(err error) bool {
 	switch errorCode(err) {
-	case ErrDatabaseError, ErrSendingEmail, ErrBadCommitment, ErrUnknown:
+	case ErrDatabaseError, ErrBadCommitment, ErrUnknown:
 		return true
 	}
 	return false

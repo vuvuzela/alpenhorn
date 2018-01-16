@@ -43,7 +43,11 @@ func BenchmarkRegister(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		err = srv.register(fmt.Sprintf("%dbenchmark", i), userPub)
+		args := &registerArgs{
+			Username: fmt.Sprintf("%dbenchmark", i),
+			LoginKey: userPub,
+		}
+		err = srv.register(args)
 		if err != nil {
 			b.Fatal(err)
 		}

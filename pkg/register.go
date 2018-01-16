@@ -5,7 +5,6 @@
 package pkg
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -22,6 +21,9 @@ type registerArgs struct {
 
 	// LoginKey is how clients authenticate to the PKG server.
 	LoginKey ed25519.PublicKey
+
+	// RegistrationToken can be used to authenticate registrations.
+	RegistrationToken string
 }
 
 func (srv *Server) registerHandler(w http.ResponseWriter, req *http.Request) {
@@ -34,7 +36,7 @@ func (srv *Server) registerHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	logger := srv.log.WithFields(log.Fields{"username": args.Username, "loginKey": base32.EncodeToString(args.LoginKey)})
-	err = srv.register(args.Username, args.LoginKey)
+	err = srv.register(args)
 	if err != nil {
 		logger = logger.WithFields(log.Fields{"code": errorCode(err).String()})
 		if isInternalError(err) {
@@ -52,39 +54,34 @@ func (srv *Server) registerHandler(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte("\"OK\""))
 }
 
-func (srv *Server) register(username string, loginKey ed25519.PublicKey) error {
-	if err := ValidateUsername(username); err != nil {
+func (srv *Server) register(args *registerArgs) error {
+	id, err := UsernameToIdentity(args.Username)
+	if err != nil {
 		return errorf(ErrInvalidUsername, "%s", err)
 	}
-	if len(loginKey) != ed25519.PublicKeySize {
-		return errorf(ErrInvalidLoginKey, "got %d bytes, want %d bytes", len(loginKey), ed25519.PublicKeySize)
+	if len(args.LoginKey) != ed25519.PublicKeySize {
+		return errorf(ErrInvalidLoginKey, "got %d bytes, want %d bytes", len(args.LoginKey), ed25519.PublicKeySize)
 	}
 
-	if srv.sendVerificationEmail == nil {
-		return srv.registerFCFS(username, loginKey)
+	err = srv.regTokenHandler(args.Username, args.RegistrationToken)
+	if err != nil {
+		return err
 	}
-
-	return srv.registerWithVerification(username, loginKey)
-}
-
-func (srv *Server) registerFCFS(username string, loginKey ed25519.PublicKey) error {
-	id := ValidUsernameToIdentity(username)
 
 	tx := srv.db.NewTransaction(true)
 	defer tx.Discard()
 
 	key := dbUserKey(id, registrationSuffix)
-	_, err := tx.Get(key)
+	_, err = tx.Get(key)
 	if err != nil && err != badger.ErrKeyNotFound {
 		return errorf(ErrDatabaseError, "%s", err)
 	}
 	if err == nil {
-		return errorf(ErrAlreadyRegistered, "%q", username)
+		return errorf(ErrAlreadyRegistered, "%q", args.Username)
 	}
 
 	newUser := userState{
-		Verified: true,
-		LoginKey: loginKey,
+		LoginKey: args.LoginKey,
 	}
 
 	err = tx.Set(key, newUser.Marshal())
@@ -95,7 +92,7 @@ func (srv *Server) registerFCFS(username string, loginKey ed25519.PublicKey) err
 	err = appendLog(tx, id, UserEvent{
 		Time:     time.Now(),
 		Type:     EventRegistered,
-		LoginKey: loginKey,
+		LoginKey: args.LoginKey,
 	})
 	if err != nil {
 		return err
@@ -107,66 +104,4 @@ func (srv *Server) registerFCFS(username string, loginKey ed25519.PublicKey) err
 	}
 
 	return nil
-}
-
-func (srv *Server) registerWithVerification(username string, loginKey ed25519.PublicKey) error {
-	id := ValidUsernameToIdentity(username)
-
-	tx := srv.db.NewTransaction(true)
-	defer tx.Discard()
-
-	key := dbUserKey(id, registrationSuffix)
-	item, err := tx.Get(key)
-	if err != nil && err != badger.ErrKeyNotFound {
-		return errorf(ErrDatabaseError, "%s", err)
-	} else if err == nil {
-		// User already exists; check if verified or expired.
-		data, err := item.Value()
-		if err != nil {
-			return errorf(ErrDatabaseError, "%s", err)
-		}
-		var user userState
-		err = user.Unmarshal(data)
-		if err != nil {
-			return errorf(ErrDatabaseError, "invalid user state: %s", err)
-		}
-		if user.Verified {
-			return errorf(ErrAlreadyRegistered, "%q", username)
-		}
-		if time.Now().Before(time.Unix(user.TokenExpires, 0)) {
-			return errorf(ErrRegistrationInProgress, "try again later")
-		}
-	}
-
-	newUser := userState{
-		Verified:          false,
-		LoginKey:          loginKey,
-		VerificationToken: newVerificationToken(),
-		TokenExpires:      time.Now().Add(24 * time.Hour).Unix(),
-	}
-
-	err = tx.Set(key, newUser.Marshal())
-	if err != nil {
-		return errorf(ErrDatabaseError, "%s", err)
-	}
-	// Write changes to disk before sending the email.
-	if err := tx.Commit(nil); err != nil {
-		return errorf(ErrDatabaseError, "%s", err)
-	}
-
-	err = srv.sendVerificationEmail(username, newUser.VerificationToken[:])
-	if err != nil {
-		return errorf(ErrSendingEmail, "%s", err)
-	}
-
-	return nil
-}
-
-func newVerificationToken() *[32]byte {
-	token := new([32]byte)
-	_, err := rand.Read(token[:])
-	if err != nil {
-		panic(err)
-	}
-	return token
 }

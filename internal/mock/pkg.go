@@ -42,7 +42,7 @@ func firstError(errors ...error) error {
 	return nil
 }
 
-func LaunchPKG(coordinatorKey ed25519.PublicKey, sendMail pkg.SendMailHandler) (*PKG, error) {
+func LaunchPKG(coordinatorKey ed25519.PublicKey, regTokenHandler pkg.RegTokenHandler) (*PKG, error) {
 	publicKey, privateKey, _ := ed25519.GenerateKey(rand.Reader)
 
 	listener, err := edtls.Listen("tcp", "localhost:0", privateKey)
@@ -63,9 +63,8 @@ func LaunchPKG(coordinatorKey ed25519.PublicKey, sendMail pkg.SendMailHandler) (
 			Level:        log.ErrorLevel,
 			EntryHandler: log.OutputText(log.Stderr),
 		},
-		CoordinatorKey: coordinatorKey,
-
-		SendVerificationEmail: sendMail,
+		CoordinatorKey:  coordinatorKey,
+		RegTokenHandler: regTokenHandler,
 	}
 	pkgServer, err := pkg.NewServer(config)
 	if err != nil {

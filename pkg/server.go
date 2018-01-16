@@ -43,8 +43,10 @@ type Server struct {
 	publicKey      ed25519.PublicKey
 	coordinatorKey ed25519.PublicKey
 
-	sendVerificationEmail SendMailHandler
+	regTokenHandler RegTokenHandler
 }
+
+type RegTokenHandler func(username string, token string) error
 
 type roundState struct {
 	masterPublicKey  *ibe.MasterPublicKey
@@ -53,8 +55,6 @@ type roundState struct {
 	blsPrivateKey    *bls.PrivateKey
 	revealSignature  []byte
 }
-
-type SendMailHandler func(toUsername string, token []byte) error
 
 // A Config is used to configure a PKG server.
 type Config struct {
@@ -71,17 +71,15 @@ type Config struct {
 	// is used if Logger is nil.
 	Logger *log.Logger
 
-	// SendVerificationEmail is invoked by the PKG to verify the identity
-	// of a user when they register. This function should send an email
-	// containing the token to the given username.
-	//
-	// If this function is nil, the PKG operates in first-come-first-serve
-	// mode. In this mode, the PKG does not verify ownership of usernames;
-	// the first user to register a username owns it.
-	SendVerificationEmail SendMailHandler
+	// RegTokenHandler is the function used to verify registration tokens.
+	RegTokenHandler RegTokenHandler
 }
 
 func NewServer(conf *Config) (*Server, error) {
+	if conf.RegTokenHandler == nil {
+		return nil, errors.New("nil RegTokenHandler")
+	}
+
 	opts := badger.DefaultOptions
 	opts.Dir = conf.DBPath
 	opts.ValueDir = conf.DBPath
@@ -98,14 +96,13 @@ func NewServer(conf *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		db:             db,
-		log:            logger,
-		rounds:         make(map[uint32]*roundState),
-		privateKey:     conf.SigningKey,
-		publicKey:      conf.SigningKey.Public().(ed25519.PublicKey),
-		coordinatorKey: conf.CoordinatorKey,
-
-		sendVerificationEmail: conf.SendVerificationEmail,
+		db:              db,
+		log:             logger,
+		rounds:          make(map[uint32]*roundState),
+		privateKey:      conf.SigningKey,
+		publicKey:       conf.SigningKey.Public().(ed25519.PublicKey),
+		coordinatorKey:  conf.CoordinatorKey,
+		regTokenHandler: conf.RegTokenHandler,
 	}
 	return s, nil
 }
@@ -123,8 +120,6 @@ func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		srv.statusHandler(w, r)
 	case "/register":
 		srv.registerHandler(w, r)
-	case "/verify":
-		srv.verifyHandler(w, r)
 	case "/commit":
 		srv.commitHandler(w, r)
 	case "/reveal":

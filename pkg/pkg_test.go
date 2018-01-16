@@ -25,9 +25,9 @@ import (
 	"vuvuzela.io/crypto/ibe"
 )
 
-func launchPKG(t *testing.T, sendMail pkg.SendMailHandler) (*mock.PKG, *pkg.CoordinatorClient) {
+func launchPKG(t *testing.T, regTokenHandler pkg.RegTokenHandler) (*mock.PKG, *pkg.CoordinatorClient) {
 	coordinatorPub, coordinatorPriv, _ := ed25519.GenerateKey(rand.Reader)
-	testpkg, err := mock.LaunchPKG(coordinatorPub, sendMail)
+	testpkg, err := mock.LaunchPKG(coordinatorPub, regTokenHandler)
 	if err != nil {
 		t.Fatalf("error launching PKG: %s", err)
 	}
@@ -40,15 +40,11 @@ func launchPKG(t *testing.T, sendMail pkg.SendMailHandler) (*mock.PKG, *pkg.Coor
 }
 
 func TestSingleClient(t *testing.T) {
-	type msg struct {
-		to    string
-		token []byte
-	}
-	emailPipe := make(chan msg, 1)
-
-	testpkg, coordinatorClient := launchPKG(t, func(to string, token []byte) error {
-		emailPipe <- msg{to, token}
-		return nil
+	testpkg, coordinatorClient := launchPKG(t, func(username string, token string) error {
+		if token == "valid token" {
+			return nil
+		}
+		return pkg.Error{Code: pkg.ErrInvalidToken}
 	})
 	defer testpkg.Close()
 
@@ -60,37 +56,17 @@ func TestSingleClient(t *testing.T) {
 		HTTPClient:      new(edhttp.Client),
 	}
 
-	err := client.Register(testpkg.PublicServerConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = client.Register(testpkg.PublicServerConfig)
-	if err.(pkg.Error).Code != pkg.ErrRegistrationInProgress {
-		t.Fatal(err)
-	}
-
-	err = client.Verify(testpkg.PublicServerConfig, []byte("wrong token"))
+	err := client.Register(testpkg.PublicServerConfig, "wrong token")
 	if err.(pkg.Error).Code != pkg.ErrInvalidToken {
 		t.Fatal(err)
 	}
 
-	email := <-emailPipe
-
-	_, otherPriv, _ := ed25519.GenerateKey(rand.Reader)
-	client.LoginKey = otherPriv
-	err = client.Verify(testpkg.PublicServerConfig, email.token)
-	if err.(pkg.Error).Code != pkg.ErrInvalidSignature {
-		t.Fatal(err)
-	}
-
-	client.LoginKey = alicePriv
-	err = client.Verify(testpkg.PublicServerConfig, email.token)
+	err = client.Register(testpkg.PublicServerConfig, "valid token")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = client.Register(testpkg.PublicServerConfig)
+	err = client.Register(testpkg.PublicServerConfig, "valid token")
 	if err.(pkg.Error).Code != pkg.ErrAlreadyRegistered {
 		t.Fatal(err)
 	}
@@ -167,46 +143,14 @@ func TestSingleClient(t *testing.T) {
 	}
 }
 
-func TestRegisterFirstComeFirstServe(t *testing.T) {
-	testpkg, coordinatorClient := launchPKG(t, nil)
-	defer testpkg.Close()
-
-	alicePub, alicePriv, _ := ed25519.GenerateKey(rand.Reader)
-	client := &pkg.Client{
-		Username:        "alice",
-		LoginKey:        alicePriv,
-		UserLongTermKey: alicePub,
-		HTTPClient:      new(edhttp.Client),
-	}
-
-	err := client.Register(testpkg.PublicServerConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = client.Register(testpkg.PublicServerConfig)
-	if err.(pkg.Error).Code != pkg.ErrAlreadyRegistered {
-		t.Fatal(err)
-	}
-
-	pkgs := []pkg.PublicServerConfig{testpkg.PublicServerConfig}
-	_, err = coordinatorClient.NewRound(pkgs, 42)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = client.Extract(testpkg.PublicServerConfig, 42)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestManyClients(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping test in short mode.")
 	}
 
-	testpkg, coordinatorClient := launchPKG(t, nil)
+	testpkg, coordinatorClient := launchPKG(t, func(username string, token string) error {
+		return nil
+	})
 	defer testpkg.Close()
 
 	numThreads := runtime.NumCPU()
@@ -231,7 +175,7 @@ func TestManyClients(t *testing.T) {
 		go func(thread int) {
 			for i := 0; i < usersPerThread; i++ {
 				client := clients[thread*usersPerThread+i]
-				err := client.Register(testpkg.PublicServerConfig)
+				err := client.Register(testpkg.PublicServerConfig, "token")
 				if err != nil {
 					log.Panicf("client register: %s", err)
 				}

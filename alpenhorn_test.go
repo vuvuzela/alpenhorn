@@ -107,7 +107,7 @@ func (u *universe) newUser(username string) *Client {
 	}
 
 	for _, pkgServer := range u.PKGs {
-		err := client.Register(pkgServer.PublicServerConfig)
+		err := client.Register(pkgServer.PublicServerConfig, "token")
 		if err != nil {
 			log.Fatalf("client.Register: %s", err)
 		}
@@ -246,7 +246,9 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	log.Infof("Alice: received call from Bob")
 
 	// Test adding a new PKG.
-	newPKG, err := mock.LaunchPKG(u.CoordinatorKey, nil)
+	newPKG, err := mock.LaunchPKG(u.CoordinatorKey, func(username string, token string) error {
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,6 +282,13 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	confs = <-alice.Handler.(*chanHandler).newConfig
 	if confs[0].Hash() != newAddFriendConfig.Hash() {
 		t.Fatalf("received unexpected config: %s", debug.Pretty(confs))
+	}
+	// Register with the new PKG. Previously, the Alpenhorn client did this automatically.
+	if err := bob2.Register(newPKG.PublicServerConfig, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := alice.Register(newPKG.PublicServerConfig, ""); err != nil {
+		t.Fatal(err)
 	}
 
 	_, err = bob2.SendFriendRequest(alice.Username, nil)
@@ -494,7 +503,9 @@ func createAlpenhornUniverse() *universe {
 
 	u.PKGs = make([]*mock.PKG, 3)
 	for i := range u.PKGs {
-		srv, err := mock.LaunchPKG(coordinatorPublic, nil)
+		srv, err := mock.LaunchPKG(coordinatorPublic, func(username string, token string) error {
+			return nil
+		})
 		if err != nil {
 			log.Panicf("launching PKG: %s", err)
 		}

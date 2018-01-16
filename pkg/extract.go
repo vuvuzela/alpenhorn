@@ -160,9 +160,6 @@ func (srv *Server) extract(args *extractArgs) (*extractReply, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !user.Verified {
-		return nil, errorf(ErrNotVerified, "%q", args.Username)
-	}
 	if !args.Verify(user.LoginKey) {
 		return nil, errorf(ErrInvalidSignature, "key=%x", user.LoginKey)
 	}

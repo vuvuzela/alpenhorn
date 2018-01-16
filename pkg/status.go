@@ -71,9 +71,6 @@ func (srv *Server) checkStatus(args *statusArgs) (*statusReply, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !user.Verified {
-		return nil, errorf(ErrNotVerified, "%q", args.Username)
-	}
 
 	if !ed25519.Verify(user.LoginKey, args.msg(), args.Signature) {
 		return nil, errorf(ErrInvalidSignature, "")

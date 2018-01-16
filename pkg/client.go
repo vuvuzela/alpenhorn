@@ -42,32 +42,16 @@ type Client struct {
 
 // Register attempts to register the client's username and login key
 // with the PKG server. It only needs to be called once per PKG server.
-func (c *Client) Register(server PublicServerConfig) error {
+func (c *Client) Register(server PublicServerConfig, token string) error {
 	loginPublicKey := c.LoginKey.Public()
 	args := &registerArgs{
-		Username: c.Username,
-		LoginKey: loginPublicKey.(ed25519.PublicKey),
+		Username:          c.Username,
+		LoginKey:          loginPublicKey.(ed25519.PublicKey),
+		RegistrationToken: token,
 	}
 
 	var reply string
 	err := c.do(server, "register", args, &reply)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// Verify is used to verify ownership of a username (email address)
-// when the PKG is not in first-come-first-serve mode.
-func (c *Client) Verify(server PublicServerConfig, token []byte) error {
-	args := &verifyArgs{
-		Username: c.Username,
-		Token:    token,
-	}
-	args.Sign(c.LoginKey)
-
-	var reply string
-	err := c.do(server, "verify", args, &reply)
 	if err != nil {
 		return err
 	}
