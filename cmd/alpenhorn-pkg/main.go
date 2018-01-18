@@ -131,6 +131,8 @@ func main() {
 			Level:        log.InfoLevel,
 			EntryHandler: logHandler,
 		},
+
+		RegTokenHandler: pkg.ExternalVerifier("https://beta.vuvuzela.io/verify"),
 	}
 	pkgServer, err := pkg.NewServer(pkgConfig)
 	if err != nil {

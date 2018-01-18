@@ -7,6 +7,7 @@ package pkg
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
@@ -104,4 +105,22 @@ func (srv *Server) register(args *registerArgs) error {
 	}
 
 	return nil
+}
+
+func ExternalVerifier(verifyURL string) RegTokenHandler {
+	return func(username string, token string) error {
+		vals := url.Values{
+			"username": []string{username},
+			"token":    []string{token},
+		}
+		resp, err := http.PostForm(verifyURL, vals)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return nil
+		}
+		return errorf(ErrInvalidToken, "")
+	}
 }
