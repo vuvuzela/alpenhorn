@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/crypto/ed25519"
 
+	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
 	"vuvuzela.io/alpenhorn/errors"
@@ -34,8 +35,6 @@ type Config struct {
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
 
-	CoordinatorKey ed25519.PublicKey
-
 	DBPath     string // path to the Badger DB
 	ListenAddr string
 	LogsDir    string
@@ -49,8 +48,6 @@ const confTemplate = `# Alpenhorn PKG server config
 
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
-
-coordinatorKey = "change me"
 
 dbPath = {{.DBPath | printf "%q"}}
 listenAddr = {{.ListenAddr | printf "%q"}}
@@ -122,10 +119,17 @@ func main() {
 		log.Fatal(err)
 	}
 
+	signedConfig, err := config.StdClient.CurrentConfig("AddFriend")
+	if err != nil {
+		log.Fatal(err)
+	}
+	addFriendConfig := signedConfig.Inner.(*config.AddFriendConfig)
+
 	pkgConfig := &pkg.Config{
-		DBPath:         conf.DBPath,
-		SigningKey:     conf.PrivateKey,
-		CoordinatorKey: conf.CoordinatorKey,
+		DBPath:     conf.DBPath,
+		SigningKey: conf.PrivateKey,
+
+		CoordinatorKey: addFriendConfig.Coordinator.Key,
 
 		Logger: &log.Logger{
 			Level:        log.InfoLevel,
@@ -163,9 +167,6 @@ func main() {
 func checkConfig(conf *Config) error {
 	if conf.ListenAddr == "" {
 		return errors.New("no listen address specified")
-	}
-	if len(conf.CoordinatorKey) != ed25519.PublicKeySize {
-		return errors.New("invalid coordinator key")
 	}
 	if len(conf.PrivateKey) != ed25519.PrivateKeySize {
 		return errors.New("invalid private key")
