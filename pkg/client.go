@@ -180,7 +180,7 @@ func (req *pkgRequest) Do() error {
 
 	resp, err := req.Client.Do(req.PublicServerConfig.Key, httpReq)
 	if err != nil {
-		return errors.Wrap(err, "error making PKG request %q", url)
+		return err
 	}
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
