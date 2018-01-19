@@ -124,6 +124,9 @@ func main() {
 		log.Fatal(err)
 	}
 	addFriendConfig := signedConfig.Inner.(*config.AddFriendConfig)
+	if addFriendConfig.RegistrarHost == "" {
+		log.Fatal("no RegistrarHost defined in current addfriend config!")
+	}
 
 	pkgConfig := &pkg.Config{
 		DBPath:     conf.DBPath,
@@ -136,7 +139,7 @@ func main() {
 			EntryHandler: logHandler,
 		},
 
-		RegTokenHandler: pkg.ExternalVerifier("https://beta.vuvuzela.io/verify"),
+		RegTokenHandler: pkg.ExternalVerifier(fmt.Sprintf("https://%s/verify", addFriendConfig.RegistrarHost)),
 	}
 	pkgServer, err := pkg.NewServer(pkgConfig)
 	if err != nil {
