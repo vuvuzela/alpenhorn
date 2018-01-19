@@ -726,6 +726,8 @@ func easyjsonDecodeAddFriendConfig6615c02e(in *jlexer.Lexer, out *AddFriendConfi
 			}
 		case "CDNServer":
 			(out.CDNServer).UnmarshalEasyJSON(in)
+		case "RegistrarHost":
+			out.RegistrarHost = string(in.String())
 		default:
 			in.SkipRecursive()
 		}
@@ -786,6 +788,12 @@ func easyjsonEncodeAddFriendConfig6615c02e(out *jwriter.Writer, in AddFriendConf
 	first = false
 	out.RawString("\"CDNServer\":")
 	(in.CDNServer).MarshalEasyJSON(out)
+	if !first {
+		out.RawByte(',')
+	}
+	first = false
+	out.RawString("\"RegistrarHost\":")
+	out.String(string(in.RegistrarHost))
 	out.RawByte('}')
 }
 

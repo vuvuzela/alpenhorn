@@ -233,6 +233,8 @@ type AddFriendConfig struct {
 	PKGServers  []pkg.PublicServerConfig
 	MixServers  []mixnet.PublicServerConfig
 	CDNServer   CDNServerConfig
+	// RegistarHost is the server that PKGs use to verify registration tokens.
+	RegistrarHost string
 }
 
 //easyjson:readable

@@ -150,6 +150,7 @@ func TestMarshalConfig(t *testing.T) {
 				Key:     guardianPub,
 				Address: "localhost:8888",
 			},
+			RegistrarHost: "vuvuzela.io",
 		},
 	}
 	sig := ed25519.Sign(guardianPriv, conf.SigningMessage())
@@ -210,7 +211,8 @@ const exampleConfig = `
     "CDNServer": {
       "Key": "5t8c7emvexkwg02yhqwksj7shc93sh3cat3yxk57ghqdr4hp7zq0",
       "Address": "localhost:8888"
-    }
+	},
+	"RegistrarHost": "vuvuzela.io"
   },
   "Guardians": [
     {
@@ -230,7 +232,7 @@ func TestUnmarshalConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if conf.Hash() != "m1yvja2gyn95syw3g8f38k59e5c2d6cjgfn2em69nxrefbtyxx2g" {
+	if conf.Hash() != "desf2ps3g35y92hz8gxaxg9jy65k0je4v9qaf18kaabrarke7qg0" {
 		t.Fatalf("unexpected config: hash=%s\n%s", conf.Hash(), debug.Pretty(conf))
 	}
 }
