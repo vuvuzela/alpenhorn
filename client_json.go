@@ -404,7 +404,7 @@ func easyjsonEncodePersistedStateC2eed687(out *jwriter.Writer, in persistedState
 	if in.AddFriendConfig == nil {
 		out.RawString("null")
 	} else {
-		(*in.AddFriendConfig).MarshalEasyJSON(out)
+		out.Raw((*in.AddFriendConfig).MarshalJSON())
 	}
 	if !first {
 		out.RawByte(',')
@@ -414,7 +414,7 @@ func easyjsonEncodePersistedStateC2eed687(out *jwriter.Writer, in persistedState
 	if in.DialingConfig == nil {
 		out.RawString("null")
 	} else {
-		(*in.DialingConfig).MarshalEasyJSON(out)
+		out.Raw((*in.DialingConfig).MarshalJSON())
 	}
 	if !first {
 		out.RawByte(',')

@@ -27,6 +27,7 @@ func TestVerify(t *testing.T) {
 	gA, gApriv := newGuardian("A")
 
 	conf1 := &SignedConfig{
+		Version:    SignedConfigVersion,
 		Service:    "Trivial",
 		Created:    time.Now(),
 		Expires:    time.Now().Add(24 * time.Hour),
@@ -35,6 +36,9 @@ func TestVerify(t *testing.T) {
 		Signatures: make(map[string][]byte),
 	}
 
+	if err := conf1.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	err := conf1.Verify()
 	if err == nil {
 		t.Fatal("expecting Verify to fail")
@@ -50,6 +54,7 @@ func TestVerify(t *testing.T) {
 	gB, gBpriv := newGuardian("B")
 
 	conf2 := &SignedConfig{
+		Version:        SignedConfigVersion,
 		Service:        "Trivial",
 		Created:        time.Now(),
 		Expires:        time.Now().Add(24 * time.Hour),
@@ -113,10 +118,12 @@ func newGuardian(username string) (Guardian, ed25519.PrivateKey) {
 	}, guardianPriv
 }
 
-func TestMarshalConfig(t *testing.T) {
+func TestMarshalAddFriendConfig(t *testing.T) {
 	guardianPub, guardianPriv, _ := ed25519.GenerateKey(rand.Reader)
 
 	conf := &SignedConfig{
+		Version: SignedConfigVersion,
+
 		// need to round otherwise the time includes a monotonic clock value
 		Created: time.Now().Round(0),
 		Expires: time.Now().Round(0),
@@ -130,6 +137,8 @@ func TestMarshalConfig(t *testing.T) {
 
 		Service: "AddFriend",
 		Inner: &AddFriendConfig{
+			Version: AddFriendConfigVersion,
+
 			Coordinator: CoordinatorConfig{
 				Key:     guardianPub,
 				Address: "localhost:8080",
@@ -156,6 +165,9 @@ func TestMarshalConfig(t *testing.T) {
 	sig := ed25519.Sign(guardianPriv, conf.SigningMessage())
 	conf.Signatures = map[string][]byte{
 		base32.EncodeToString(guardianPub): sig,
+	}
+	if err := conf.Verify(); err != nil {
+		t.Fatal(err)
 	}
 
 	data, err := json.Marshal(conf)
@@ -185,13 +197,79 @@ func TestMarshalConfig(t *testing.T) {
 	}
 }
 
+func TestMarshalDialingConfig(t *testing.T) {
+	guardianPub, guardianPriv, _ := ed25519.GenerateKey(rand.Reader)
+
+	conf := &SignedConfig{
+		Version: SignedConfigVersion,
+
+		// need to round otherwise the time includes a monotonic clock value
+		Created: time.Now().Round(0),
+		Expires: time.Now().Round(0),
+
+		Guardians: []Guardian{
+			{
+				Username: "david",
+				Key:      guardianPub,
+			},
+		},
+
+		Service: "Dialing",
+		Inner: &DialingConfig{
+			Version: DialingConfigVersion,
+
+			Coordinator: CoordinatorConfig{
+				Key:     guardianPub,
+				Address: "localhost:8080",
+			},
+			MixServers: []mixnet.PublicServerConfig{
+				{
+					Key:     guardianPub,
+					Address: "localhost:1234",
+				},
+			},
+			CDNServer: CDNServerConfig{
+				Key:     guardianPub,
+				Address: "localhost:8888",
+			},
+		},
+	}
+	sig := ed25519.Sign(guardianPriv, conf.SigningMessage())
+	conf.Signatures = map[string][]byte{
+		base32.EncodeToString(guardianPub): sig,
+	}
+	if err := conf.Verify(); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := json.Marshal(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conf2 := new(SignedConfig)
+	err = json.Unmarshal(data, conf2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if conf.Hash() != conf2.Hash() {
+		t.Fatalf("round-trip failed:\nbefore=%s\nafter=%s\n", debug.Pretty(conf), debug.Pretty(conf2))
+	}
+	if !reflect.DeepEqual(conf, conf2) {
+		t.Fatalf("round-trip failed:\nbefore=%s\nafter=%s\n", debug.Pretty(conf), debug.Pretty(conf2))
+	}
+}
+
 const exampleConfig = `
 {
+  "Version": 1,
   "Service": "AddFriend",
   "Created": "2017-09-29T06:47:05.396965796-04:00",
   "Expires": "2017-09-29T06:47:05.396966008-04:00",
   "PrevConfigHash": "",
   "Inner": {
+    "Version": 1,
     "Coordinator": {
       "Key": "5t8c7emvexkwg02yhqwksj7shc93sh3cat3yxk57ghqdr4hp7zq0",
       "Address": "localhost:8080"
@@ -232,7 +310,17 @@ func TestUnmarshalConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if conf.Hash() != "desf2ps3g35y92hz8gxaxg9jy65k0je4v9qaf18kaabrarke7qg0" {
+	addFriendConf := conf.Inner.(*AddFriendConfig)
+	if addFriendConf.RegistrarHost != "vuvuzela.io" {
+		t.Fatalf("invalid RegistrarHost: %q", addFriendConf.RegistrarHost)
+	}
+	if key := base32.EncodeToString(addFriendConf.PKGServers[0].Key); key != "5t8c7emvexkwg02yhqwksj7shc93sh3cat3yxk57ghqdr4hp7zq0" {
+		t.Fatalf("invalid PKG key: %q", key)
+	}
+	if key := base32.EncodeToString(addFriendConf.MixServers[0].Key); key != "5t8c7emvexkwg02yhqwksj7shc93sh3cat3yxk57ghqdr4hp7zq0" {
+		t.Fatalf("invalid mix server key: %q", key)
+	}
+	if conf.Hash() != "h0hfmekxv2p9n1bxa269whhadpmmynddbbes94e4zg9q4bsbjb90" {
 		t.Fatalf("unexpected config: hash=%s\n%s", conf.Hash(), debug.Pretty(conf))
 	}
 }

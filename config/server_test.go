@@ -33,11 +33,15 @@ func TestServer(t *testing.T) {
 	_ = guardian1Private
 
 	startingConfig := &SignedConfig{
+		Version: 1,
+
 		Created: time.Now(),
 		Expires: time.Now().Add(24 * time.Hour),
 
 		Service: "AddFriend",
 		Inner: &AddFriendConfig{
+			Version: 1,
+
 			Coordinator: CoordinatorConfig{
 				Key:     guardian1Public,
 				Address: "localhost:1234",
@@ -90,6 +94,8 @@ func TestServer(t *testing.T) {
 	}
 
 	newConfig := &SignedConfig{
+		Version: 1,
+
 		Created: time.Now(),
 		Expires: time.Now().Add(24 * time.Hour),
 
@@ -97,6 +103,8 @@ func TestServer(t *testing.T) {
 
 		Service: "AddFriend",
 		Inner: &AddFriendConfig{
+			Version: 1,
+
 			Coordinator: CoordinatorConfig{
 				Key:     guardian1Public,
 				Address: "localhost:1234",

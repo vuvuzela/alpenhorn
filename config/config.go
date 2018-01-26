@@ -23,9 +23,12 @@ import (
 // Use github.com/davidlazar/easyjson:
 //go:generate easyjson .
 
+const SignedConfigVersion = 1
+
 // SignedConfig is an entry in a hash chain of configs.
-//easyjson:nounmarshal,readable
 type SignedConfig struct {
+	Version int
+
 	// Service is the name of the service this config corresponds to
 	// (e.g., "AddFriend", "Dialing", or "Convo").
 	Service string
@@ -59,12 +62,9 @@ type Guardian struct {
 	Key      ed25519.PublicKey
 }
 
-const configVersion byte = 1
-
 func (c *SignedConfig) SigningMessage() []byte {
 	buf := new(bytes.Buffer)
 	buf.WriteString("SignedConfig")
-	buf.WriteByte(configVersion)
 
 	clone := *c
 	clone.Signatures = nil
@@ -139,6 +139,9 @@ func (c *SignedConfig) Verify() error {
 }
 
 func (c *SignedConfig) Validate() error {
+	if c.Version <= 0 {
+		return errors.New("invalid version number: %d", c.Version)
+	}
 	for i, guardian := range c.Guardians {
 		if len(guardian.Key) != ed25519.PublicKeySize {
 			return errors.New("invalid key for guardian %i: %v", i, guardian.Key)
@@ -164,7 +167,9 @@ func (c *SignedConfig) Hash() string {
 }
 
 //easyjson:readable
-type configMsg struct {
+type signedConfigV1 struct {
+	Version int
+
 	Created        time.Time
 	Expires        time.Time
 	PrevConfigHash string
@@ -175,6 +180,86 @@ type configMsg struct {
 	Guardians []Guardian
 
 	Signatures map[string][]byte
+}
+
+func (c *SignedConfig) MarshalJSON() ([]byte, error) {
+	switch c.Version {
+	case 1:
+		innerJSON, err := json.Marshal(c.Inner)
+		if err != nil {
+			return nil, err
+		}
+		c1 := &signedConfigV1{
+			Version: 1,
+
+			Created:        c.Created,
+			Expires:        c.Expires,
+			PrevConfigHash: c.PrevConfigHash,
+
+			Service: c.Service,
+			Inner:   innerJSON,
+
+			Guardians:  c.Guardians,
+			Signatures: c.Signatures,
+		}
+		return json.Marshal(c1)
+	default:
+		return nil, errors.New("unknown SignedConfig version: %d", c.Version)
+	}
+}
+
+func (c *SignedConfig) UnmarshalJSON(data []byte) error {
+	version, err := getVersionFromJSON(data)
+	if err != nil {
+		return err
+	}
+
+	switch version {
+	case 1:
+		c1 := new(signedConfigV1)
+		err := json.Unmarshal(data, c1)
+		if err != nil {
+			return err
+		}
+
+		inner, err := decodeInner(c1.Service, c1.Inner)
+		if err != nil {
+			return err
+		}
+
+		c.Version = 1
+
+		c.Created = c1.Created
+		c.Expires = c1.Expires
+		c.PrevConfigHash = c1.PrevConfigHash
+
+		c.Service = c1.Service
+		c.Inner = inner
+
+		c.Guardians = c1.Guardians
+		c.Signatures = c1.Signatures
+	default:
+		return errors.New("unknown SignedConfig version: %d", c.Version)
+	}
+
+	return nil
+}
+
+func decodeInner(service string, rawJSON json.RawMessage) (InnerConfig, error) {
+	registerMu.Lock()
+	innerType, ok := registeredServices[service]
+	registerMu.Unlock()
+	if !ok {
+		return nil, errors.New("unregistered service unmarshaling config: %q", service)
+	}
+
+	rawInner := reflect.New(innerType).Interface()
+	err := json.Unmarshal(rawJSON, rawInner)
+	if err != nil {
+		return nil, err
+	}
+	inner := rawInner.(InnerConfig)
+	return inner, nil
 }
 
 var (
@@ -195,53 +280,16 @@ func init() {
 	RegisterService("Dialing", &DialingConfig{})
 }
 
-func (c *SignedConfig) UnmarshalJSON(data []byte) error {
-	msg := new(configMsg)
-	err := json.Unmarshal(data, msg)
-	if err != nil {
-		return err
-	}
+const AddFriendConfigVersion = 1
 
-	registerMu.Lock()
-	innerType, ok := registeredServices[msg.Service]
-	registerMu.Unlock()
-	if !ok {
-		return errors.New("unregistered service unmarshaling config: %q", msg.Service)
-	}
-
-	rawInner := reflect.New(innerType).Interface()
-	err = json.Unmarshal(msg.Inner, rawInner)
-	if err != nil {
-		return err
-	}
-	inner := rawInner.(InnerConfig)
-
-	c.Created = msg.Created
-	c.Expires = msg.Expires
-	c.PrevConfigHash = msg.PrevConfigHash
-	c.Service = msg.Service
-	c.Inner = inner
-	c.Guardians = msg.Guardians
-	c.Signatures = msg.Signatures
-
-	return nil
-}
-
-//easyjson:readable
 type AddFriendConfig struct {
+	Version     int
 	Coordinator CoordinatorConfig
 	PKGServers  []pkg.PublicServerConfig
 	MixServers  []mixnet.PublicServerConfig
 	CDNServer   CDNServerConfig
 	// RegistarHost is the server that PKGs use to verify registration tokens.
 	RegistrarHost string
-}
-
-//easyjson:readable
-type DialingConfig struct {
-	Coordinator CoordinatorConfig
-	MixServers  []mixnet.PublicServerConfig
-	CDNServer   CDNServerConfig
 }
 
 //easyjson:readable
@@ -256,7 +304,60 @@ type CDNServerConfig struct {
 	Address string
 }
 
+//easyjson:readable
+type addFriendV1 struct {
+	Version       int
+	Coordinator   keyAddr
+	PKGServers    []keyAddr
+	MixServers    []keyAddr
+	CDNServer     keyAddr
+	RegistrarHost string
+}
+
+//easyjson:readable
+type keyAddr struct {
+	Key     ed25519.PublicKey
+	Address string
+}
+
+func (c *AddFriendConfig) v1() (*addFriendV1, error) {
+	c1 := &addFriendV1{
+		Version:       1,
+		Coordinator:   keyAddr{c.Coordinator.Key, c.Coordinator.Address},
+		PKGServers:    make([]keyAddr, len(c.PKGServers)),
+		MixServers:    make([]keyAddr, len(c.MixServers)),
+		CDNServer:     keyAddr{c.CDNServer.Key, c.CDNServer.Address},
+		RegistrarHost: c.RegistrarHost,
+	}
+	for i, srv := range c.PKGServers {
+		c1.PKGServers[i] = keyAddr{srv.Key, srv.Address}
+	}
+	for i, srv := range c.MixServers {
+		c1.MixServers[i] = keyAddr{srv.Key, srv.Address}
+	}
+	return c1, nil
+}
+
+func (c *AddFriendConfig) fromV1(c1 *addFriendV1) error {
+	c.Version = 1
+	c.Coordinator = CoordinatorConfig{c1.Coordinator.Key, c1.Coordinator.Address}
+	c.PKGServers = make([]pkg.PublicServerConfig, len(c1.PKGServers))
+	c.MixServers = make([]mixnet.PublicServerConfig, len(c1.MixServers))
+	c.CDNServer = CDNServerConfig{c1.CDNServer.Key, c1.CDNServer.Address}
+	for i, srv := range c1.PKGServers {
+		c.PKGServers[i] = pkg.PublicServerConfig{Key: srv.Key, Address: srv.Address}
+	}
+	for i, srv := range c1.MixServers {
+		c.MixServers[i] = mixnet.PublicServerConfig{Key: srv.Key, Address: srv.Address}
+	}
+	c.RegistrarHost = c1.RegistrarHost
+	return nil
+}
+
 func (c *AddFriendConfig) Validate() error {
+	if c.Version <= 0 {
+		return errors.New("invalid version number: %d", c.Version)
+	}
 	if c.Coordinator.Address == "" {
 		return errors.New("empty address for coordinator")
 	}
@@ -292,7 +393,113 @@ func (c *AddFriendConfig) Validate() error {
 	return nil
 }
 
+func (c *AddFriendConfig) MarshalJSON() ([]byte, error) {
+	switch c.Version {
+	case 1:
+		c1, err := c.v1()
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(c1)
+	default:
+		return nil, errors.New("unknown AddFriendConfig version: %d", c.Version)
+	}
+}
+
+func (c *AddFriendConfig) UnmarshalJSON(data []byte) error {
+	version, err := getVersionFromJSON(data)
+	if err != nil {
+		return err
+	}
+	switch version {
+	case 1:
+		c1 := new(addFriendV1)
+		err := json.Unmarshal(data, c1)
+		if err != nil {
+			return err
+		}
+		return c.fromV1(c1)
+	default:
+		return errors.New("unknown AddFriendConfig version: %d", c.Version)
+	}
+}
+
+const DialingConfigVersion = 1
+
+type DialingConfig struct {
+	Version     int
+	Coordinator CoordinatorConfig
+	MixServers  []mixnet.PublicServerConfig
+	CDNServer   CDNServerConfig
+}
+
+//easyjson:readable
+type dialingV1 struct {
+	Version     int
+	Coordinator keyAddr
+	MixServers  []keyAddr
+	CDNServer   keyAddr
+}
+
+func (c *DialingConfig) v1() (*dialingV1, error) {
+	c1 := &dialingV1{
+		Version:     1,
+		Coordinator: keyAddr{c.Coordinator.Key, c.Coordinator.Address},
+		MixServers:  make([]keyAddr, len(c.MixServers)),
+		CDNServer:   keyAddr{c.CDNServer.Key, c.CDNServer.Address},
+	}
+	for i, srv := range c.MixServers {
+		c1.MixServers[i] = keyAddr{srv.Key, srv.Address}
+	}
+	return c1, nil
+}
+
+func (c *DialingConfig) fromV1(c1 *dialingV1) error {
+	c.Version = 1
+	c.Coordinator = CoordinatorConfig{c1.Coordinator.Key, c1.Coordinator.Address}
+	c.MixServers = make([]mixnet.PublicServerConfig, len(c1.MixServers))
+	c.CDNServer = CDNServerConfig{c1.CDNServer.Key, c1.CDNServer.Address}
+	for i, srv := range c1.MixServers {
+		c.MixServers[i] = mixnet.PublicServerConfig{Key: srv.Key, Address: srv.Address}
+	}
+	return nil
+}
+
+func (c *DialingConfig) MarshalJSON() ([]byte, error) {
+	switch c.Version {
+	case 1:
+		c1, err := c.v1()
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(c1)
+	default:
+		return nil, errors.New("unknown DialingConfig version: %d", c.Version)
+	}
+}
+
+func (c *DialingConfig) UnmarshalJSON(data []byte) error {
+	version, err := getVersionFromJSON(data)
+	if err != nil {
+		return err
+	}
+	switch version {
+	case 1:
+		c1 := new(dialingV1)
+		err := json.Unmarshal(data, c1)
+		if err != nil {
+			return err
+		}
+		return c.fromV1(c1)
+	default:
+		return errors.New("unknown DialingConfig version: %d", c.Version)
+	}
+}
+
 func (c *DialingConfig) Validate() error {
+	if c.Version <= 0 {
+		return errors.New("invalid version number: %d", c.Version)
+	}
 	if c.Coordinator.Address == "" {
 		return errors.New("empty address for coordinator")
 	}
@@ -314,4 +521,16 @@ func (c *DialingConfig) Validate() error {
 	}
 
 	return nil
+}
+
+func getVersionFromJSON(data []byte) (int, error) {
+	type ver struct {
+		Version int
+	}
+	v := new(ver)
+	err := json.Unmarshal(data, v)
+	if err != nil {
+		return -1, err
+	}
+	return v.Version, nil
 }

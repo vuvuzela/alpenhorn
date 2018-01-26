@@ -257,12 +257,14 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	prevAddFriendConfig := u.CurrentConfig("AddFriend")
 	prevAddFriendInner := prevAddFriendConfig.Inner.(*config.AddFriendConfig)
 	newAddFriendConfig := &config.SignedConfig{
+		Version:        config.SignedConfigVersion,
 		Created:        time.Now(),
 		Expires:        time.Now().Add(24 * time.Hour),
 		PrevConfigHash: prevAddFriendConfig.Hash(),
 
 		Service: "AddFriend",
 		Inner: &config.AddFriendConfig{
+			Version:     config.AddFriendConfigVersion,
 			Coordinator: prevAddFriendInner.Coordinator,
 			MixServers:  prevAddFriendInner.MixServers,
 			PKGServers:  append(prevAddFriendInner.PKGServers, newPKG.PublicServerConfig),
@@ -331,12 +333,14 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	prevAddFriendConfig = u.CurrentConfig("AddFriend")
 	prevAddFriendInner = prevAddFriendConfig.Inner.(*config.AddFriendConfig)
 	newAddFriendConfig = &config.SignedConfig{
+		Version:        config.SignedConfigVersion,
 		Created:        time.Now(),
 		Expires:        time.Now().Add(24 * time.Hour),
 		PrevConfigHash: prevAddFriendConfig.Hash(),
 
 		Service: "AddFriend",
 		Inner: &config.AddFriendConfig{
+			Version:     config.AddFriendConfigVersion,
 			Coordinator: prevAddFriendInner.Coordinator,
 			MixServers:  append(prevAddFriendInner.MixServers, newChain.Servers...),
 			PKGServers:  prevAddFriendInner.PKGServers,
@@ -381,12 +385,14 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	// Add more servers to the dialing mixchain.
 	prevDialingConfig := u.CurrentConfig("Dialing")
 	newDialingConfig := &config.SignedConfig{
+		Version:        config.SignedConfigVersion,
 		Created:        time.Now(),
 		Expires:        time.Now().Add(24 * time.Hour),
 		PrevConfigHash: prevDialingConfig.Hash(),
 
 		Service: "Dialing",
 		Inner: &config.DialingConfig{
+			Version:     config.DialingConfigVersion,
 			Coordinator: prevDialingConfig.Inner.(*config.DialingConfig).Coordinator,
 			MixServers:  append(prevDialingConfig.Inner.(*config.DialingConfig).MixServers, newChain.Servers...),
 			CDNServer:   prevDialingConfig.Inner.(*config.DialingConfig).CDNServer,
@@ -513,11 +519,13 @@ func createAlpenhornUniverse() *universe {
 	}
 
 	addFriendConfig := &config.SignedConfig{
+		Version: config.SignedConfigVersion,
 		Created: time.Now(),
 		Expires: time.Now().Add(24 * time.Hour),
 
 		Service: "AddFriend",
 		Inner: &config.AddFriendConfig{
+			Version: config.AddFriendConfigVersion,
 			Coordinator: config.CoordinatorConfig{
 				Key:     u.CoordinatorKey,
 				Address: u.CoordinatorAddress,
@@ -566,11 +574,13 @@ func createAlpenhornUniverse() *universe {
 	}
 
 	dialingConfig := &config.SignedConfig{
+		Version: config.SignedConfigVersion,
 		Created: time.Now(),
 		Expires: time.Now().Add(24 * time.Hour),
 
 		Service: "Dialing",
 		Inner: &config.DialingConfig{
+			Version: config.DialingConfigVersion,
 			Coordinator: config.CoordinatorConfig{
 				Key:     u.CoordinatorKey,
 				Address: u.CoordinatorAddress,
