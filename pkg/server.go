@@ -425,6 +425,9 @@ func (c *CoordinatorClient) NewRound(pkgs []PublicServerConfig, round uint32) (R
 // ValidateUsername returns nil if username is a valid username,
 // otherwise returns an error that explains why the username is invalid.
 func ValidateUsername(username string) error {
+	if len(username) < 3 {
+		return errors.New("username must be at least 3 characters: %s", username)
+	}
 	if len(username) > 32 {
 		return errors.New("username must be 32 characters or less: %s", username)
 	}
