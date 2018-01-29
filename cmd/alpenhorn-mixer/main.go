@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"vuvuzela.io/alpenhorn/addfriend"
+	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/dialing"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
@@ -37,8 +38,6 @@ type Config struct {
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
 
-	CoordinatorKey ed25519.PublicKey
-
 	ListenAddr string
 	LogsDir    string
 
@@ -54,8 +53,6 @@ const confTemplate = `# Alpenhorn mixnet server config
 
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
-
-coordinatorKey = "change me"
 
 listenAddr = {{.ListenAddr | printf "%q"}}
 logsDir = {{.LogsDir | printf "%q" }}
@@ -133,18 +130,21 @@ func main() {
 		log.Fatalf("error parsing config %q: %s", *confPath, err)
 	}
 
-	if conf.CoordinatorKey == nil {
-		log.Fatal("no alpenhorn coordinator key specified in config")
-	}
-
 	logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	signedConfig, err := config.StdClient.CurrentConfig("AddFriend")
+	if err != nil {
+		log.Fatal(err)
+	}
+	addFriendConfig := signedConfig.Inner.(*config.AddFriendConfig)
+
 	mixServer := &mixnet.Server{
-		SigningKey:     conf.PrivateKey,
-		CoordinatorKey: conf.CoordinatorKey,
+		SigningKey: conf.PrivateKey,
+		// Assumes that AddFriend and Dialing use the same coordinator.
+		CoordinatorKey: addFriendConfig.Coordinator.Key,
 		Log: &log.Logger{
 			Level:        log.InfoLevel,
 			EntryHandler: logHandler,
