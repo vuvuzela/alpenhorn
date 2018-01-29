@@ -37,12 +37,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	config := new(config.SignedConfig)
+	conf := new(config.SignedConfig)
 
-	if err := json.Unmarshal(configBytes, config); err != nil {
+	if err := json.Unmarshal(configBytes, conf); err != nil {
 		log.Fatalf("error decoding json: %s", err)
 	}
-	if err := config.Validate(); err != nil {
+	if err := conf.Validate(); err != nil {
 		log.Fatalf("invalid config: %s", err)
 	}
 
@@ -53,7 +53,7 @@ func main() {
 	publicKey := privateKey.Public().(ed25519.PublicKey)
 
 	myPos := -1
-	for i, g := range config.Guardians {
+	for i, g := range conf.Guardians {
 		if bytes.Equal(g.Key, publicKey) {
 			myPos = i
 		}
@@ -62,8 +62,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "! Warning: your key is not in the supplied config's Guardian list!\n")
 	}
 
-	msg := config.SigningMessage()
+	msg := conf.SigningMessage()
 	sig := ed25519.Sign(privateKey, msg)
+	if conf.Signatures == nil {
+		conf.Signatures = make(map[string][]byte)
+	}
+	conf.Signatures[base32.EncodeToString(publicKey)] = sig
 
-	fmt.Printf("%q: %q\n", base32.EncodeToString(publicKey), base32.EncodeToString(sig))
+	data, err := json.MarshalIndent(conf, "", "  ")
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("%s\n", data)
 }
