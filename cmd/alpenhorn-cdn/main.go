@@ -30,11 +30,11 @@ var (
 )
 
 type Config struct {
+	PublicKey  ed25519.PublicKey
+	PrivateKey ed25519.PrivateKey
 	DBPath     string
 	ListenAddr string
 	LogsDir    string
-	PublicKey  ed25519.PublicKey
-	PrivateKey ed25519.PrivateKey
 }
 
 var funcMap = template.FuncMap{
@@ -43,12 +43,12 @@ var funcMap = template.FuncMap{
 
 const confTemplate = `# Alpenhorn CDN config
 
+publicKey  = {{.PublicKey | base32 | printf "%q"}}
+privateKey = {{.PrivateKey | base32 | printf "%q"}}
+
 dbPath = {{.DBPath | printf "%q" }}
 listenAddr = {{.ListenAddr | printf "%q" }}
 logsDir = {{.LogsDir | printf "%q" }}
-
-publicKey  = {{.PublicKey | base32 | printf "%q"}}
-privateKey = {{.PrivateKey | base32 | printf "%q"}}
 `
 
 func writeNewConfig() {
