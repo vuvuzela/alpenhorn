@@ -60,6 +60,9 @@ func writeNewConfig() {
 	conf := &Config{
 		PublicKey:  publicKey,
 		PrivateKey: privateKey,
+
+		DBPath:     "cdn_data",
+		ListenAddr: "0.0.0.0:8080",
 		LogsDir:    alplog.DefaultLogsDir("alpenhorn-cdn", publicKey),
 	}
 
