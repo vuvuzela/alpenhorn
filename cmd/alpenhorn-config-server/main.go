@@ -59,6 +59,9 @@ func main() {
 		Prompt:     autocert.AcceptTOS,
 		HostPolicy: autocert.HostWhitelist(*hostname),
 	}
+	// Listen on :80 for http-01 ACME challenge.
+	go http.ListenAndServe(":http", certManager.HTTPHandler(nil))
+
 	httpServer := &http.Server{
 		Addr:      ":https",
 		Handler:   server,
