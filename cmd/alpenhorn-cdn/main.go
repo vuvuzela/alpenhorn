@@ -13,10 +13,10 @@ import (
 	"os"
 	"text/template"
 
-	"github.com/davidlazar/go-crypto/encoding/base32"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/cdn"
+	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
 	"vuvuzela.io/alpenhorn/internal/alplog"
@@ -30,12 +30,11 @@ var (
 )
 
 type Config struct {
-	DBPath         string
-	ListenAddr     string
-	LogsDir        string
-	PublicKey      ed25519.PublicKey
-	PrivateKey     ed25519.PrivateKey
-	CoordinatorKey ed25519.PublicKey
+	DBPath     string
+	ListenAddr string
+	LogsDir    string
+	PublicKey  ed25519.PublicKey
+	PrivateKey ed25519.PrivateKey
 }
 
 var funcMap = template.FuncMap{
@@ -50,8 +49,6 @@ logsDir = {{.LogsDir | printf "%q" }}
 
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
-
-coordinatorKey = {{.CoordinatorKey | base32 | printf "%q" }}
 `
 
 func writeNewConfig() {
@@ -109,16 +106,19 @@ func main() {
 	if conf.ListenAddr == "" {
 		log.Fatal("empty listen address in config")
 	}
-	if len(conf.CoordinatorKey) != ed25519.PublicKeySize {
-		log.Fatalf("invalid coordinator key in config: %q", base32.EncodeToString(conf.CoordinatorKey))
-	}
 
 	logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	server, err := cdn.New(conf.DBPath, conf.CoordinatorKey)
+	signedConfig, err := config.StdClient.CurrentConfig("AddFriend")
+	if err != nil {
+		log.Fatal(err)
+	}
+	addFriendConfig := signedConfig.Inner.(*config.AddFriendConfig)
+
+	server, err := cdn.New(conf.DBPath, addFriendConfig.Coordinator.Key)
 	if err != nil {
 		log.Fatal(err)
 	}
