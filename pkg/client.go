@@ -145,7 +145,8 @@ func (c *Client) do(server PublicServerConfig, path string, args, reply interfac
 		Reply:              reply,
 		Client:             c.HTTPClient,
 		TweakRequest: func(req *http.Request) {
-			req.Close = true
+			// We're running addfriend faster, so keep connection alive for now.
+			//req.Close = true
 		},
 	}
 
