@@ -85,7 +85,7 @@ func (srv *Mixer) SortMessages(messages [][]byte) map[string][]byte {
 
 	mailboxes := make(map[string][]byte)
 	for mbox, tokens := range groups {
-		f := bloom.New(bloom.Optimal(len(tokens), 0.00001))
+		f := bloom.New(bloom.Optimal(len(tokens), 0.000001))
 		for _, token := range tokens {
 			f.Set(token)
 		}
