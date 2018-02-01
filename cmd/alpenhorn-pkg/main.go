@@ -158,7 +158,8 @@ func main() {
 	httpServer := &http.Server{
 		Handler:      pkgServer,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	sigChan := make(chan os.Signal, 1)
