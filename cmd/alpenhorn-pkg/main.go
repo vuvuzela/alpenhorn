@@ -6,11 +6,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"text/template"
 	"time"
 
@@ -145,15 +148,38 @@ func main() {
 	if err != nil {
 		log.Fatalf("pkg.NewServer: %s", err)
 	}
+	defer func() {
+		err := pkgServer.Close()
+		if err != nil {
+			log.Infof("PKG closed with error: %s", err)
+		}
+	}()
 
-	listener, err := edtls.Listen("tcp", conf.ListenAddr, conf.PrivateKey)
-	if err != nil {
-		log.Fatalf("edtls.Listen: %s", err)
-	}
 	httpServer := &http.Server{
 		Handler:      pkgServer,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
+	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	shutdownDone := make(chan struct{})
+	go func() {
+		<-sigChan
+		log.Infof("Shutting down...")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		err := httpServer.Shutdown(ctx)
+		if err != nil {
+			log.Infof("HTTP server shutdown with error: %s", err)
+		}
+		close(shutdownDone)
+	}()
+
+	listener, err := edtls.Listen("tcp", conf.ListenAddr, conf.PrivateKey)
+	if err != nil {
+		log.Fatalf("edtls.Listen: %s", err)
 	}
 
 	// Let the user know what's happening before switching the logger.
@@ -162,9 +188,11 @@ func main() {
 	pkgConfig.Logger.Infof("Listening on %q", conf.ListenAddr)
 
 	err = httpServer.Serve(listener)
-	if err != nil {
-		log.Fatalf("http listen: %s", err)
+	if err != http.ErrServerClosed {
+		log.Errorf("http listen: %s", err)
 	}
+
+	<-shutdownDone
 }
 
 func checkConfig(conf *Config) error {
