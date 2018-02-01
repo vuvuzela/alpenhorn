@@ -36,7 +36,7 @@ func (c *Client) dialingMux() typesocket.Mux {
 }
 
 func (c *Client) dialingRoundError(conn typesocket.Conn, v coordinator.RoundError) {
-	log.WithFields(log.Fields{"round": v.Round}).Errorf("dialing coordinator sent error: %s", v.Err)
+	log.WithFields(log.Fields{"round": v.Round}).Errorf("error from dialing coordinator: %s", v.Err)
 }
 
 func (c *Client) newDialingRound(conn typesocket.Conn, v coordinator.NewRound) {
