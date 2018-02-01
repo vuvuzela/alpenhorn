@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/crypto/acme/autocert"
 
@@ -66,6 +67,9 @@ func main() {
 		Addr:      ":https",
 		Handler:   server,
 		TLSConfig: &tls.Config{GetCertificate: certManager.GetCertificate},
+
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
 	log.Printf("Listening on https://%s", *hostname)
 	log.Fatal(httpServer.ListenAndServeTLS("", ""))
