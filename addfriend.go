@@ -358,6 +358,10 @@ func (c *Client) scanMailbox(conn typesocket.Conn, v coordinator.MailboxURL) {
 		c.Handler.Error(errors.Wrap(err, "fetching mailbox"))
 		return
 	}
+	if len(mailbox) == 0 || len(mailbox)%addfriend.SizeEncryptedIntro != 0 {
+		c.Handler.Error(errors.New("round %d: malformed addfriend mailbox: id=%d len=%d", mailboxID, len(mailbox)))
+		return
+	}
 
 	st.mu.Lock()
 	if !st.ExtractSuccess {
