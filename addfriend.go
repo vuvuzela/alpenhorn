@@ -359,7 +359,7 @@ func (c *Client) scanMailbox(conn typesocket.Conn, v coordinator.MailboxURL) {
 		return
 	}
 	if len(mailbox) == 0 || len(mailbox)%addfriend.SizeEncryptedIntro != 0 {
-		c.Handler.Error(errors.New("round %d: malformed addfriend mailbox: id=%d len=%d", mailboxID, len(mailbox)))
+		c.Handler.Error(errors.New("round %d: malformed addfriend mailbox: id=%d len=%d", v.Round, mailboxID, len(mailbox)))
 		return
 	}
 
