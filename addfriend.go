@@ -177,15 +177,15 @@ func (c *Client) extractPKGKeys(conn typesocket.Conn, v coordinator.PKGRound) {
 		HTTPClient:      c.edhttpClient,
 	}
 
-	for i, pkgServer := range st.Config.PKGServers {
-		extractResult, err := pkgClient.Extract(pkgServer, v.Round)
-		if err != nil {
-			c.Handler.Error(errors.Wrap(err, "round %d: error extracting private key from %s", v.Round, pkgServer.Address))
-			return
-		}
+	extractFn := func(i int, pkgServer pkg.PublicServerConfig) error {
 		hexkey := hex.EncodeToString(pkgServer.Key)
 		st.ServerMasterKeys[i] = v.PKGSettings[hexkey].MasterPublicKey
 		st.ServerBLSKeys[i] = v.PKGSettings[hexkey].BLSPublicKey
+
+		extractResult, err := pkgClient.Extract(pkgServer, v.Round)
+		if err != nil {
+			return errors.Wrap(err, "round %d: error extracting private key from %s", v.Round, pkgServer.Address)
+		}
 		st.PrivateKeys[i] = extractResult.PrivateKey
 
 		attestation := &pkg.Attestation{
@@ -194,13 +194,30 @@ func (c *Client) extractPKGKeys(conn typesocket.Conn, v coordinator.PKGRound) {
 			UserLongTermKey: c.LongTermPublicKey,
 		}
 		if !bls.Verify(st.ServerBLSKeys[i:i+1], [][]byte{attestation.Marshal()}, extractResult.IdentitySig) {
-			log.Errorf("pkg %s gave us an invalid identity signature", pkgServer.Address)
-			return
+			return errors.New("pkg %s gave us an invalid identity signature", pkgServer.Address)
 		}
 		st.IdentitySigs[i] = extractResult.IdentitySig
+		return nil
 	}
 
-	st.ExtractSuccess = true
+	errs := make(chan error, 1)
+	for i, pkgServer := range st.Config.PKGServers {
+		go func(i int, srv pkg.PublicServerConfig) {
+			errs <- extractFn(i, srv)
+		}(i, pkgServer)
+	}
+
+	hasErr := false
+	for _ = range st.Config.PKGServers {
+		err := <-errs
+		if err != nil {
+			hasErr = true
+			c.Handler.Error(err)
+		}
+	}
+	if !hasErr {
+		st.ExtractSuccess = true
+	}
 }
 
 var zeroNonce = new([24]byte)
