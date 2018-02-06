@@ -9,25 +9,31 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // Code is an ANSI escape code.
-type Code int
+type Code string
 
 const (
-	Reset   Code = 0
-	Bold    Code = 1
-	Reverse Code = 7
-	Red     Code = 31
-	Green   Code = 32
-	Yellow  Code = 33
-	Blue    Code = 34
-	Magenta Code = 35
-	Cyan    Code = 36
-	White   Code = 37 // Usually light grey.
+	Reset   Code = "0"
+	Bold    Code = "1"
+	Reverse Code = "7"
+	Red     Code = "38;5;1"
+	Green   Code = "38;5;2"
+	Yellow  Code = "38;5;3"
+	Blue    Code = "38;5;4"
+	Magenta Code = "38;5;5"
+	Cyan    Code = "38;5;6"
+	White   Code = "38;5;7" // Usually light grey.
 )
 
 var AllColors = []Code{Red, Green, Yellow, Blue, Magenta, Cyan, White}
+
+// Foreground returns a color from [0,255].
+func Foreground(color int) Code {
+	return Code(fmt.Sprintf("38;5;%d", color))
+}
 
 type ansiFormatter struct {
 	value interface{}
@@ -68,11 +74,7 @@ func (af *ansiFormatter) Format(f fmt.State, c rune) {
 		return
 	}
 
-	fmt.Fprintf(f, "\x1b[%d", af.codes[0])
-	for _, code := range af.codes[1:] {
-		fmt.Fprintf(f, ";%d", code)
-	}
-	f.Write([]byte{'m'})
+	fmt.Fprintf(f, "\x1b[%sm", joinCodes(af.codes))
 	fmt.Fprintf(f, format, af.value)
 	fmt.Fprint(f, "\x1b[0m")
 }
@@ -82,26 +84,12 @@ func WriteString(dst io.Writer, str string, codes ...Code) (n int, err error) {
 		return io.WriteString(dst, str)
 	}
 
-	n, err = fmt.Fprintf(dst, "\x1b[%d", codes[0])
+	n, err = fmt.Fprintf(dst, "\x1b[%sm", joinCodes(codes))
 	if err != nil {
 		return
 	}
 
-	var nn int
-	for _, code := range codes[1:] {
-		nn, err = fmt.Fprintf(dst, ";%d", code)
-		n += nn
-		if err != nil {
-			return
-		}
-	}
-	nn, err = fmt.Fprint(dst, "m")
-	n += nn
-	if err != nil {
-		return
-	}
-
-	nn, err = io.WriteString(dst, str)
+	nn, err := io.WriteString(dst, str)
 	n += nn
 	if err != nil {
 		return
@@ -110,4 +98,12 @@ func WriteString(dst io.Writer, str string, codes ...Code) (n int, err error) {
 	nn, err = fmt.Fprint(dst, "\x1b[0m")
 	n += nn
 	return
+}
+
+func joinCodes(codes []Code) string {
+	strs := make([]string, len(codes))
+	for i := range strs {
+		strs[i] = string(codes[i])
+	}
+	return strings.Join(strs, ";")
 }
