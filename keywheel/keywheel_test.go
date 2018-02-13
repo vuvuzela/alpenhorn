@@ -107,12 +107,12 @@ func TestKeywheel(t *testing.T) {
 	if len(alltokens) != 2 {
 		t.Fatalf("expected single element in token list, got %d", len(alltokens))
 	}
-	var w Wheel
 	for _, u := range alltokens {
+		var w *Wheel
 		if u.FromUsername == bob {
-			w = bw
+			w = &bw
 		} else if u.FromUsername == chris {
-			w = cw
+			w = &cw
 		} else {
 			t.Fatalf("unexpected user in incoming dial tokens: %s", u.FromUsername)
 		}
