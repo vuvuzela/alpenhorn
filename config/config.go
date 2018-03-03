@@ -16,8 +16,8 @@ import (
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/errors"
-	"vuvuzela.io/alpenhorn/mixnet"
 	"vuvuzela.io/alpenhorn/pkg"
+	"vuvuzela.io/vuvuzela/mixnet"
 )
 
 // Use github.com/davidlazar/easyjson:

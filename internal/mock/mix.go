@@ -5,7 +5,6 @@
 package mock
 
 import (
-	"fmt"
 	"net"
 
 	"golang.org/x/crypto/ed25519"
@@ -17,9 +16,9 @@ import (
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/internal/alplog"
 	"vuvuzela.io/alpenhorn/log"
-	"vuvuzela.io/alpenhorn/mixnet"
-	"vuvuzela.io/alpenhorn/mixnet/mixnetpb"
 	"vuvuzela.io/crypto/rand"
+	"vuvuzela.io/vuvuzela/mixnet"
+	"vuvuzela.io/vuvuzela/mixnet/convopb"
 )
 
 type Mixchain struct {
@@ -64,12 +63,15 @@ func LaunchMixchain(length int, coordinatorKey ed25519.PublicKey) *Mixchain {
 		mixer := &mixnet.Server{
 			SigningKey:     privateKeys[pos],
 			CoordinatorKey: coordinatorKey,
-			Log: logger.WithFields(log.Fields{
-				"tag": fmt.Sprintf("mixer-%d", pos),
-			}),
+			/*
+				Log: logger.WithFields(log.Fields{
+					"tag": fmt.Sprintf("mixer-%d", pos),
+				}),
+			*/
 
 			Services: map[string]mixnet.MixService{
 				"AddFriend": &addfriend.Mixer{
+					SigningKey: privateKeys[pos],
 					Laplace: rand.Laplace{
 						Mu: 100,
 						B:  3.0,
@@ -77,6 +79,7 @@ func LaunchMixchain(length int, coordinatorKey ed25519.PublicKey) *Mixchain {
 				},
 
 				"Dialing": &dialing.Mixer{
+					SigningKey: privateKeys[pos],
 					Laplace: rand.Laplace{
 						Mu: 100,
 						B:  3.0,
@@ -88,7 +91,7 @@ func LaunchMixchain(length int, coordinatorKey ed25519.PublicKey) *Mixchain {
 		creds := credentials.NewTLS(edtls.NewTLSServerConfig(privateKeys[pos]))
 
 		grpcServer := grpc.NewServer(grpc.Creds(creds))
-		mixnetpb.RegisterMixnetServer(grpcServer, mixer)
+		convopb.RegisterMixnetServer(grpcServer, mixer)
 
 		mixServers[pos] = mixer
 		rpcServers[pos] = grpcServer

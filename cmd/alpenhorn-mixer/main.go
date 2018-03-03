@@ -24,9 +24,9 @@ import (
 	"vuvuzela.io/alpenhorn/encoding/toml"
 	"vuvuzela.io/alpenhorn/internal/alplog"
 	"vuvuzela.io/alpenhorn/log"
-	"vuvuzela.io/alpenhorn/mixnet"
-	pb "vuvuzela.io/alpenhorn/mixnet/mixnetpb"
 	"vuvuzela.io/crypto/rand"
+	"vuvuzela.io/vuvuzela/mixnet"
+	pb "vuvuzela.io/vuvuzela/mixnet/convopb"
 )
 
 var (
@@ -130,10 +130,12 @@ func main() {
 		log.Fatalf("error parsing config %q: %s", *confPath, err)
 	}
 
-	logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
-	if err != nil {
-		log.Fatal(err)
-	}
+	/*
+		logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
+		if err != nil {
+			log.Fatal(err)
+		}
+	*/
 
 	signedConfig, err := config.StdClient.CurrentConfig("AddFriend")
 	if err != nil {
@@ -145,18 +147,16 @@ func main() {
 		SigningKey: conf.PrivateKey,
 		// Assumes that AddFriend and Dialing use the same coordinator.
 		CoordinatorKey: addFriendConfig.Coordinator.Key,
-		Log: &log.Logger{
-			Level:        log.InfoLevel,
-			EntryHandler: logHandler,
-		},
 
 		Services: map[string]mixnet.MixService{
 			"AddFriend": &addfriend.Mixer{
-				Laplace: conf.AddFriendNoise,
+				SigningKey: conf.PrivateKey,
+				Laplace:    conf.AddFriendNoise,
 			},
 
 			"Dialing": &dialing.Mixer{
-				Laplace: conf.DialingNoise,
+				SigningKey: conf.PrivateKey,
+				Laplace:    conf.DialingNoise,
 			},
 		},
 	}
@@ -166,9 +166,8 @@ func main() {
 
 	pb.RegisterMixnetServer(grpcServer, mixServer)
 
-	// Record the start time in the logs dir and on stderr.
-	mixServer.Log.Infof("Listening on %q")
-	log.Infof("Listening on %q; logging to %s", conf.ListenAddr, logHandler.Name())
+	log.Infof("Listening on %q")
+	//log.Infof("Listening on %q; logging to %s", conf.ListenAddr, logHandler.Name())
 
 	listener, err := net.Listen("tcp", conf.ListenAddr)
 	if err != nil {
@@ -176,5 +175,5 @@ func main() {
 	}
 
 	err = grpcServer.Serve(listener)
-	mixServer.Log.Fatalf("Shutdown: %s", err)
+	log.Fatalf("Shutdown: %s", err)
 }

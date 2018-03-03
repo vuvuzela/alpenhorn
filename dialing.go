@@ -10,6 +10,7 @@ import (
 	"github.com/davidlazar/go-crypto/encoding/base32"
 	"golang.org/x/crypto/ed25519"
 
+	"vuvuzela.io/alpenhorn/addfriend"
 	"vuvuzela.io/alpenhorn/bloom"
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/coordinator"
@@ -18,6 +19,7 @@ import (
 	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/typesocket"
 	"vuvuzela.io/crypto/onionbox"
+	"vuvuzela.io/vuvuzela/mixnet"
 )
 
 type dialingRoundState struct {
@@ -95,6 +97,11 @@ func (c *Client) sendDialingOnion(conn typesocket.Conn, v coordinator.MixRound) 
 		return
 	}
 
+	serviceData := new(addfriend.ServiceData)
+	if err := serviceData.Unmarshal(v.MixSettings.RawServiceData); err != nil {
+		c.Handler.Error(errors.New("sendAddFriendOnion: round %d: error parsing service data: %s", round, err))
+		return
+	}
 	settingsMsg := v.MixSettings.SigningMessage()
 
 	for i, mixer := range st.Config.MixServers {
@@ -123,13 +130,13 @@ func (c *Client) sendDialingOnion(conn typesocket.Conn, v coordinator.MixRound) 
 
 		token := call.computeKeys().token
 		copy(mixMessage.Token[:], token[:])
-		mixMessage.Mailbox = usernameToMailbox(call.Username, v.MixSettings.NumMailboxes)
+		mixMessage.Mailbox = usernameToMailbox(call.Username, serviceData.NumMailboxes)
 	} else {
 		// Send cover traffic.
 		mixMessage.Mailbox = 0
 	}
 
-	onion, _ := onionbox.Seal(mustMarshal(mixMessage), zeroNonce, v.MixSettings.OnionKeys)
+	onion, _ := onionbox.Seal(mustMarshal(mixMessage), mixnet.ForwardNonce(round), v.MixSettings.OnionKeys)
 
 	// respond to the entry server with our onion for this round
 	omsg := coordinator.OnionMsg{

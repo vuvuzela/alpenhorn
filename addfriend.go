@@ -27,6 +27,7 @@ import (
 	"vuvuzela.io/crypto/bls"
 	"vuvuzela.io/crypto/ibe"
 	"vuvuzela.io/crypto/onionbox"
+	"vuvuzela.io/vuvuzela/mixnet"
 )
 
 type addFriendRoundState struct {
@@ -220,8 +221,6 @@ func (c *Client) extractPKGKeys(conn typesocket.Conn, v coordinator.PKGRound) {
 	}
 }
 
-var zeroNonce = new([24]byte)
-
 func (c *Client) sendAddFriendOnion(conn typesocket.Conn, v coordinator.MixRound) {
 	round := v.MixSettings.Round
 
@@ -233,6 +232,11 @@ func (c *Client) sendAddFriendOnion(conn typesocket.Conn, v coordinator.MixRound
 		return
 	}
 
+	serviceData := new(addfriend.ServiceData)
+	if err := serviceData.Unmarshal(v.MixSettings.RawServiceData); err != nil {
+		c.Handler.Error(errors.New("sendAddFriendOnion: round %d: error parsing service data: %s", round, err))
+		return
+	}
 	settingsMsg := v.MixSettings.SigningMessage()
 
 	for i, mixer := range st.Config.MixServers {
@@ -271,10 +275,10 @@ func (c *Client) sendAddFriendOnion(conn typesocket.Conn, v coordinator.MixRound
 	encIntroBytes := mustMarshal(encIntro)
 
 	mixMessage := new(addfriend.MixMessage)
-	mixMessage.Mailbox = usernameToMailbox(sentReq.Username, v.MixSettings.NumMailboxes)
+	mixMessage.Mailbox = usernameToMailbox(sentReq.Username, serviceData.NumMailboxes)
 	subtle.ConstantTimeCopy(isReal, mixMessage.EncryptedIntro[:], encIntroBytes)
 
-	onion, _ := onionbox.Seal(mustMarshal(mixMessage), zeroNonce, v.MixSettings.OnionKeys)
+	onion, _ := onionbox.Seal(mustMarshal(mixMessage), mixnet.ForwardNonce(round), v.MixSettings.OnionKeys)
 
 	omsg := coordinator.OnionMsg{
 		Round: round,

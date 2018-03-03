@@ -17,13 +17,15 @@ import (
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/net/context"
 
+	"vuvuzela.io/alpenhorn/addfriend"
 	"vuvuzela.io/alpenhorn/config"
+	"vuvuzela.io/alpenhorn/dialing"
 	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/log"
-	"vuvuzela.io/alpenhorn/mixnet"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/alpenhorn/typesocket"
+	"vuvuzela.io/vuvuzela/mixnet"
 )
 
 // Server is the coordinator (entry) server for the add-friend or dialing
@@ -226,6 +228,7 @@ func (srv *Server) loop() {
 		}
 		configHash := currentConfig.Hash()
 
+		var rawServiceData []byte
 		var mixServers []mixnet.PublicServerConfig
 		var cdnServer config.CDNServerConfig
 		var pkgServers []pkg.PublicServerConfig
@@ -235,10 +238,20 @@ func (srv *Server) loop() {
 			mixServers = conf.MixServers
 			cdnServer = conf.CDNServer
 			pkgServers = conf.PKGServers
+			rawServiceData = addfriend.ServiceData{
+				CDNKey:       cdnServer.Key,
+				CDNAddress:   cdnServer.Address,
+				NumMailboxes: srv.NumMailboxes,
+			}.Marshal()
 		case "Dialing":
 			conf := currentConfig.Inner.(*config.DialingConfig)
 			mixServers = conf.MixServers
 			cdnServer = conf.CDNServer
+			rawServiceData = dialing.ServiceData{
+				CDNKey:       cdnServer.Key,
+				CDNAddress:   cdnServer.Address,
+				NumMailboxes: srv.NumMailboxes,
+			}.Marshal()
 		default:
 			log.Panicf("invalid service type: %q", srv.Service)
 		}
@@ -301,11 +314,11 @@ func (srv *Server) loop() {
 		}
 
 		mixSettings := mixnet.RoundSettings{
-			Service:      srv.Service,
-			Round:        round,
-			NumMailboxes: srv.NumMailboxes,
+			Service:        srv.Service,
+			Round:          round,
+			RawServiceData: rawServiceData,
 		}
-		mixSigs, err := srv.mixnetClient.NewRound(context.Background(), mixServers, cdnServer.Address, cdnServer.Key, &mixSettings)
+		mixSigs, err := srv.mixnetClient.NewRound(context.Background(), mixServers, &mixSettings)
 		if err != nil {
 			logger.WithFields(log.Fields{"call": "mixnet.NewRound"}).Errorf("mixnet.NewRound failed: %s", err)
 			if !srv.sleep(10 * time.Second) {
@@ -362,7 +375,7 @@ func (srv *Server) runRound(ctx context.Context, firstServer mixnet.PublicServer
 	}).Info("Start mixing")
 	start := time.Now()
 
-	url, err := srv.mixnetClient.RunRound(ctx, firstServer, srv.Service, round, onions)
+	url, err := srv.mixnetClient.RunRoundUnidirectional(ctx, firstServer, srv.Service, round, onions)
 	if err != nil {
 		srv.Log.WithFields(log.Fields{
 			"round": round,

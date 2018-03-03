@@ -15,8 +15,8 @@ import (
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/internal/debug"
-	"vuvuzela.io/alpenhorn/mixnet"
 	"vuvuzela.io/alpenhorn/pkg"
+	"vuvuzela.io/vuvuzela/mixnet"
 )
 
 type trivialInner struct{}
