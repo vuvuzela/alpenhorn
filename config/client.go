@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"vuvuzela.io/alpenhorn/errors"
-	"vuvuzela.io/alpenhorn/internal/debug"
+	"vuvuzela.io/internal/debug"
 )
 
 var StdClient = &Client{
