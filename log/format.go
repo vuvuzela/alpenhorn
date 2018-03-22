@@ -31,6 +31,7 @@ func (e *Entry) JSON(w io.Writer) error {
 	m := make(Fields, len(e.Fields)+3)
 	m["time"] = e.Time
 	m["level"] = e.Level.String()
+	m["unixnano"] = e.Time.UnixNano()
 	if e.Message != "" {
 		m["msg"] = e.Message
 	}
