@@ -28,7 +28,7 @@ func BenchmarkRegister(b *testing.B) {
 		DBPath: dbPath,
 		Logger: &log.Logger{
 			Level:        log.ErrorLevel,
-			EntryHandler: log.OutputText(log.Stderr),
+			EntryHandler: &log.OutputText{Out: log.Stderr},
 		},
 		SigningKey: serverPriv,
 	}

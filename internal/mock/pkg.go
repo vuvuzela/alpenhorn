@@ -61,7 +61,7 @@ func LaunchPKG(coordinatorKey ed25519.PublicKey, regTokenHandler pkg.RegTokenHan
 		DBPath:     dbPath,
 		Logger: &log.Logger{
 			Level:        log.ErrorLevel,
-			EntryHandler: log.OutputText(log.Stderr),
+			EntryHandler: &log.OutputText{Out: log.Stderr},
 		},
 		CoordinatorKey:  coordinatorKey,
 		RegTokenHandler: regTokenHandler,
