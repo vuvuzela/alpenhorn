@@ -4,9 +4,16 @@
 
 package log
 
+import (
+	"os"
+
+	"github.com/mattn/go-isatty"
+)
+
 var StdLogger = &Logger{
 	EntryHandler: &OutputText{
-		Out: Stderr,
+		Out:           Stderr,
+		DisableColors: !isatty.IsTerminal(os.Stderr.Fd()),
 	},
 	Level: InfoLevel,
 }

@@ -67,14 +67,15 @@ func (h *outputJSON) Fire(e *Entry) {
 // human-readable text to Out. The entry handler makes exactly
 // one call to Out.Write for each entry.
 type OutputText struct {
-	Out io.Writer
+	Out           io.Writer
+	DisableColors bool
 }
 
 func (h *OutputText) Fire(e *Entry) {
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 
-	prettyPrint(buf, e)
+	h.prettyPrint(buf, e)
 
 	_, err := h.Out.Write(buf.Bytes())
 	if err != nil {
@@ -84,16 +85,20 @@ func (h *OutputText) Fire(e *Entry) {
 	bufPool.Put(buf)
 }
 
-func prettyPrint(buf *bytes.Buffer, e *Entry) {
+func (h *OutputText) prettyPrint(buf *bytes.Buffer, e *Entry) {
 	color := e.Level.Color()
-	if e.Level == InfoLevel {
+	if e.Level == InfoLevel || h.DisableColors {
 		// Colorful timestamps on info messages is too distracting.
 		buf.WriteString(e.Time.Format("2006-01-02 15:04:05"))
 	} else {
 		ansi.WriteString(buf, e.Time.Format("2006-01-02 15:04:05"), color, ansi.Bold)
 	}
 	fmt.Fprintf(buf, " %s %-44s ", e.Level.Icon(), e.Message)
-	Logfmt(buf, e.Fields, color)
+	if h.DisableColors {
+		Logfmt(buf, e.Fields)
+	} else {
+		Logfmt(buf, e.Fields, color)
+	}
 	buf.WriteByte('\n')
 }
 
