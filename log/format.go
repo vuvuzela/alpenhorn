@@ -63,24 +63,20 @@ func (h *outputJSON) Fire(e *Entry) {
 	}
 }
 
-type outputText struct {
-	dst io.Writer
+// OutputText is an entry handler that writes a log entry as
+// human-readable text to Out. The entry handler makes exactly
+// one call to Out.Write for each entry.
+type OutputText struct {
+	Out io.Writer
 }
 
-// OutputText returns an entry handler that writes a log entry
-// as human-readable text to dst. The entry handler makes exactly
-// one call to dst.Write for each entry.
-func OutputText(dst io.Writer) EntryHandler {
-	return &outputText{dst}
-}
-
-func (h *outputText) Fire(e *Entry) {
+func (h *OutputText) Fire(e *Entry) {
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 
 	prettyPrint(buf, e)
 
-	_, err := h.dst.Write(buf.Bytes())
+	_, err := h.Out.Write(buf.Bytes())
 	if err != nil {
 		fmt.Fprintf(Stderr, "Error writing log entry: %s", err)
 	}

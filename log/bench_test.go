@@ -34,8 +34,10 @@ func newJSONLogger(out io.Writer) *log.Logger {
 
 func newTextLogger(out io.Writer) *log.Logger {
 	return &log.Logger{
-		EntryHandler: log.OutputText(log.NewMutexWriter(out)),
-		Level:        log.DebugLevel,
+		EntryHandler: &log.OutputText{
+			Out: log.NewMutexWriter(out),
+		},
+		Level: log.DebugLevel,
 	}
 }
 

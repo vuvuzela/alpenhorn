@@ -5,8 +5,10 @@
 package log
 
 var StdLogger = &Logger{
-	EntryHandler: OutputText(Stderr),
-	Level:        InfoLevel,
+	EntryHandler: &OutputText{
+		Out: Stderr,
+	},
+	Level: InfoLevel,
 }
 
 func WithFields(fields Fields) *Logger          { return StdLogger.WithFields(fields) }
