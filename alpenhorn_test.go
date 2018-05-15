@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dgraph-io/badger"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/cdn"
@@ -124,8 +125,8 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 		u.Destroy()
 	}()
 
-	alice := u.newUser("alice")
-	bob := u.newUser("bob")
+	alice := u.newUser("alice@example.com")
+	bob := u.newUser("bob@example.com")
 	bob.ClientPersistPath = filepath.Join(u.Dir, "bob-client")
 	bob.KeywheelPersistPath = filepath.Join(u.Dir, "bob-keywheel")
 
@@ -246,7 +247,7 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 	log.Infof("Alice: received call from Bob")
 
 	// Test adding a new PKG.
-	newPKG, err := mock.LaunchPKG(u.CoordinatorKey, func(username string, token string) error {
+	newPKG, err := mock.LaunchPKG(u.CoordinatorKey, pkg.SMTPRelay{}, func(username string, token string, tx *badger.Txn) error {
 		return nil
 	})
 	if err != nil {
@@ -509,7 +510,7 @@ func createAlpenhornUniverse() *universe {
 
 	u.PKGs = make([]*mock.PKG, 3)
 	for i := range u.PKGs {
-		srv, err := mock.LaunchPKG(coordinatorPublic, func(username string, token string) error {
+		srv, err := mock.LaunchPKG(coordinatorPublic, pkg.SMTPRelay{}, func(username string, token string, tx *badger.Txn) error {
 			return nil
 		})
 		if err != nil {

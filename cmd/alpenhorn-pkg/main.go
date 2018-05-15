@@ -41,6 +41,9 @@ type Config struct {
 	DBPath     string // path to the Badger DB
 	ListenAddr string
 	LogsDir    string
+
+	SMTPServer string
+	EmailFrom  string
 }
 
 var funcMap = template.FuncMap{
@@ -55,6 +58,9 @@ privateKey = {{.PrivateKey | base32 | printf "%q"}}
 dbPath = {{.DBPath | printf "%q"}}
 listenAddr = {{.ListenAddr | printf "%q"}}
 logsDir = {{.LogsDir | printf "%q" }}
+
+smtpServer = {{.SMTPServer | printf "%q"}}
+emailFrom = {{.EmailFrom | printf "%q"}}
 `
 
 func writeNewConfig() {
@@ -71,6 +77,9 @@ func writeNewConfig() {
 
 		DBPath:     "pkg_data",
 		ListenAddr: "0.0.0.0:80",
+
+		SMTPServer: "localhost:587",
+		EmailFrom:  "pkg@example.com",
 	}
 
 	tmpl := template.Must(template.New("config").Funcs(funcMap).Parse(confTemplate))
@@ -127,8 +136,11 @@ func main() {
 		log.Fatal(err)
 	}
 	addFriendConfig := signedConfig.Inner.(*config.AddFriendConfig)
-	if addFriendConfig.RegistrarHost == "" {
-		log.Fatal("no RegistrarHost defined in current addfriend config!")
+	if addFriendConfig.Registrar.Address == "" {
+		log.Fatal("no Registrar address defined in current addfriend config!")
+	}
+	if len(addFriendConfig.Registrar.Key) != ed25519.PublicKeySize {
+		log.Fatal("no Registrar key defined in current addfriend config!")
 	}
 
 	pkgConfig := &pkg.Config{
@@ -136,13 +148,22 @@ func main() {
 		SigningKey: conf.PrivateKey,
 
 		CoordinatorKey: addFriendConfig.Coordinator.Key,
+		RegistrarKey:   addFriendConfig.Registrar.Key,
+
+		Addr: conf.ListenAddr,
+
+		SMTPRelay: pkg.SMTPRelay{
+			Addr:       conf.SMTPServer,
+			From:       conf.EmailFrom,
+			SkipVerify: false,
+		},
 
 		Logger: &log.Logger{
 			Level:        log.InfoLevel,
 			EntryHandler: logHandler,
 		},
 
-		RegTokenHandler: pkg.ExternalVerifier(fmt.Sprintf("https://%s/verify", addFriendConfig.RegistrarHost)),
+		RegTokenHandler: pkg.EmailTokenVerifier(),
 	}
 	pkgServer, err := pkg.NewServer(pkgConfig)
 	if err != nil {
@@ -202,6 +223,12 @@ func checkConfig(conf *Config) error {
 	}
 	if len(conf.PrivateKey) != ed25519.PrivateKeySize {
 		return errors.New("invalid private key")
+	}
+	if conf.SMTPServer == "" {
+		return errors.New("no smtp server specified")
+	}
+	if conf.EmailFrom == "" {
+		return errors.New("no email from address specified")
 	}
 	expectedPub := conf.PrivateKey.Public().(ed25519.PublicKey)
 	if !bytes.Equal(expectedPub, conf.PublicKey) {

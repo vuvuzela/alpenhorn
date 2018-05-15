@@ -20,6 +20,7 @@ var (
 	registrationSuffix   = []byte(":registration")
 	lastExtractionSuffix = []byte(":lastextract")
 	userLogSuffix        = []byte(":log")
+	emailTokenSuffix     = []byte(":emailtoken")
 )
 
 func dbUserKey(identity *[64]byte, suffix []byte) []byte {
@@ -160,4 +161,28 @@ func (srv *Server) GetUserLog(identity *[64]byte) (UserEventLog, error) {
 		return log.Unmarshal(data)
 	})
 	return log, err
+}
+
+type emailToken struct {
+	Token string
+}
+
+const emailTokenBinaryVersion byte = 1
+
+func (t emailToken) Marshal() []byte {
+	data := make([]byte, 1+len(t.Token))
+	data[0] = emailTokenBinaryVersion
+	copy(data[1:], t.Token)
+	return data
+}
+
+func (t *emailToken) Unmarshal(data []byte) error {
+	if len(data) < 2 {
+		return errors.New("short data")
+	}
+	if data[0] == 1 {
+		t.Token = string(data[1:])
+		return nil
+	}
+	return errors.New("unknown emailToken version: %d", data[0])
 }

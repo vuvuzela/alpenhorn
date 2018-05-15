@@ -11,6 +11,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/dgraph-io/badger"
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/log"
@@ -31,6 +32,10 @@ func BenchmarkRegister(b *testing.B) {
 			EntryHandler: &log.OutputText{Out: log.Stderr},
 		},
 		SigningKey: serverPriv,
+
+		RegTokenHandler: func(username string, token string, tx *badger.Txn) error {
+			return nil
+		},
 	}
 
 	srv, err := NewServer(conf)
@@ -44,7 +49,7 @@ func BenchmarkRegister(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		args := &registerArgs{
-			Username: fmt.Sprintf("%dbenchmark", i),
+			Username: fmt.Sprintf("%dbenchmark@example.com", i),
 			LoginKey: userPub,
 		}
 		err = srv.register(args)

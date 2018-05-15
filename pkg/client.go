@@ -51,7 +51,7 @@ func (c *Client) Register(server PublicServerConfig, token string) error {
 	}
 
 	var reply string
-	err := c.do(server, "register", args, &reply)
+	err := c.do(server, "user/register", args, &reply)
 	if err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func (c *Client) CheckStatus(server PublicServerConfig) error {
 	args.Signature = ed25519.Sign(c.LoginKey, args.msg())
 
 	var reply statusReply
-	err := c.do(server, "status", args, &reply)
+	err := c.do(server, "user/status", args, &reply)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func (c *Client) Extract(server PublicServerConfig, round uint32) (*ExtractResul
 	args.Sign(c.LoginKey)
 
 	reply := new(extractReply)
-	err = c.do(server, "extract", args, reply)
+	err = c.do(server, "user/extract", args, reply)
 	if err != nil {
 		return nil, err
 	}

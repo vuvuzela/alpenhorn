@@ -5,9 +5,10 @@
 package pkg
 
 import (
+	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
@@ -16,6 +17,111 @@ import (
 
 	"vuvuzela.io/alpenhorn/log"
 )
+
+type preregisterArgs struct {
+	Username string
+	PKGIndex int
+	NumPKGs  int
+}
+
+func (srv *Server) preregisterHandler(w http.ResponseWriter, req *http.Request) {
+	if !srv.authorized(srv.registrarKey, w, req) {
+		return
+	}
+
+	body := http.MaxBytesReader(w, req.Body, 256)
+	args := new(preregisterArgs)
+	err := json.NewDecoder(body).Decode(args)
+	if err != nil {
+		httpError(w, errorf(ErrBadRequestJSON, "%s", err))
+		return
+	}
+
+	logger := srv.log.WithFields(log.Fields{"username": args.Username})
+	err = srv.preregister(args)
+	if err != nil {
+		logger = logger.WithFields(log.Fields{"code": errorCode(err).String()})
+		if isInternalError(err) {
+			logger.Errorf("Pre-registration failed: %s", err)
+		} else {
+			// Avoid polluting stderr for user-caused errors.
+			logger.Infof("Pre-registration failed: %s", err)
+		}
+		httpError(w, err)
+		return
+	}
+	logger.Info("Pre-registration successful")
+
+	// reply with valid json
+	w.Write([]byte("\"OK\""))
+}
+
+func (srv *Server) preregister(args *preregisterArgs) error {
+	id, err := UsernameToIdentity(args.Username)
+	if err != nil {
+		return errorf(ErrInvalidUsername, "%s", err)
+	}
+
+	tx := srv.db.NewTransaction(true)
+	defer tx.Discard()
+
+	key := dbUserKey(id, registrationSuffix)
+	_, err = tx.Get(key)
+	if err != nil && err != badger.ErrKeyNotFound {
+		return errorf(ErrDatabaseError, "%s", err)
+	}
+	if err == nil {
+		return errorf(ErrAlreadyRegistered, "%s", args.Username)
+	}
+
+	tokenKey := dbUserKey(id, emailTokenSuffix)
+	_, err = tx.Get(tokenKey)
+	if err != nil && err != badger.ErrKeyNotFound {
+		return errorf(ErrDatabaseError, "%s", err)
+	}
+	if err == nil {
+		return errorf(ErrRegistrationInProgress, "%s", args.Username)
+	}
+
+	tokenBytes := make([]byte, 24)
+	rand.Read(tokenBytes[:])
+	token := base32.EncodeToString(tokenBytes)
+
+	emailToken := emailToken{
+		Token: token,
+	}
+	err = tx.SetWithTTL(tokenKey, emailToken.Marshal(), 24*time.Hour)
+	if err != nil {
+		return errorf(ErrDatabaseError, "%s", err)
+	}
+
+	err = tx.Commit(nil)
+	if err != nil {
+		return errorf(ErrDatabaseError, "%s", err)
+	}
+
+	emailData := verifyEmailData{
+		From:  srv.smtpRelay.From,
+		To:    args.Username,
+		Date:  time.Now().Format(time.RFC822),
+		Token: token,
+
+		PKGAddr:  srv.addr,
+		PKGIndex: args.PKGIndex,
+		NumPKGs:  args.NumPKGs,
+	}
+	msgBuf := new(bytes.Buffer)
+	if err := verifyEmailTemplate.Execute(msgBuf, emailData); err != nil {
+		return errorf(ErrSendingEmail, "template error: %s", err)
+	}
+
+	err = srv.smtpRelay.SendMail(args.Username, msgBuf.Bytes())
+	if err != nil {
+		return errorf(ErrSendingEmail, "%s", err)
+	}
+
+	return nil
+}
 
 type registerArgs struct {
 	Username string
@@ -64,13 +170,13 @@ func (srv *Server) register(args *registerArgs) error {
 		return errorf(ErrInvalidLoginKey, "got %d bytes, want %d bytes", len(args.LoginKey), ed25519.PublicKeySize)
 	}
 
-	err = srv.regTokenHandler(args.Username, args.RegistrationToken)
+	tx := srv.db.NewTransaction(true)
+	defer tx.Discard()
+
+	err = srv.regTokenHandler(args.Username, args.RegistrationToken, tx)
 	if err != nil {
 		return err
 	}
-
-	tx := srv.db.NewTransaction(true)
-	defer tx.Discard()
 
 	key := dbUserKey(id, registrationSuffix)
 	_, err = tx.Get(key)
@@ -107,20 +213,28 @@ func (srv *Server) register(args *registerArgs) error {
 	return nil
 }
 
-func ExternalVerifier(verifyURL string) RegTokenHandler {
-	return func(username string, token string) error {
-		vals := url.Values{
-			"username": []string{username},
-			"token":    []string{token},
+func EmailTokenVerifier() RegTokenHandler {
+	return func(username string, token string, tx *badger.Txn) error {
+		id := ValidUsernameToIdentity(username)
+		item, err := tx.Get(dbUserKey(id, emailTokenSuffix))
+		if err != nil && err != badger.ErrKeyNotFound {
+			return errorf(ErrDatabaseError, "%s", err)
 		}
-		resp, err := http.PostForm(verifyURL, vals)
+		if err == badger.ErrKeyNotFound {
+			return errorf(ErrNotRegistered, "%s", username)
+		}
+		emailTokenBytes, err := item.Value()
 		if err != nil {
-			return err
+			return errorf(ErrDatabaseError, "%s", err)
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
-			return nil
+		emailToken := new(emailToken)
+		if err := emailToken.Unmarshal(emailTokenBytes); err != nil {
+			return errorf(ErrDatabaseError, "%s", err)
 		}
-		return errorf(ErrInvalidToken, "")
+		if token != emailToken.Token {
+			return errorf(ErrInvalidToken, "%q", token)
+		}
+
+		return nil
 	}
 }

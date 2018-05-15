@@ -42,7 +42,7 @@ func firstError(errors ...error) error {
 	return nil
 }
 
-func LaunchPKG(coordinatorKey ed25519.PublicKey, regTokenHandler pkg.RegTokenHandler) (*PKG, error) {
+func LaunchPKG(coordinatorKey ed25519.PublicKey, smtpRelay pkg.SMTPRelay, regTokenHandler pkg.RegTokenHandler) (*PKG, error) {
 	publicKey, privateKey, _ := ed25519.GenerateKey(rand.Reader)
 
 	listener, err := edtls.Listen("tcp", "localhost:0", privateKey)
@@ -57,13 +57,19 @@ func LaunchPKG(coordinatorKey ed25519.PublicKey, regTokenHandler pkg.RegTokenHan
 	}
 
 	config := &pkg.Config{
-		SigningKey: privateKey,
 		DBPath:     dbPath,
+		SigningKey: privateKey,
+		Addr:       addr,
+
 		Logger: &log.Logger{
 			Level:        log.ErrorLevel,
 			EntryHandler: &log.OutputText{Out: log.Stderr},
 		},
-		CoordinatorKey:  coordinatorKey,
+
+		CoordinatorKey: coordinatorKey,
+		RegistrarKey:   coordinatorKey,
+
+		SMTPRelay:       smtpRelay,
 		RegTokenHandler: regTokenHandler,
 	}
 	pkgServer, err := pkg.NewServer(config)

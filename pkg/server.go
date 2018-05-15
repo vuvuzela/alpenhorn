@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/dgraph-io/badger"
@@ -42,11 +43,14 @@ type Server struct {
 	privateKey     ed25519.PrivateKey
 	publicKey      ed25519.PublicKey
 	coordinatorKey ed25519.PublicKey
+	registrarKey   ed25519.PublicKey
 
+	addr            string
+	smtpRelay       SMTPRelay
 	regTokenHandler RegTokenHandler
 }
 
-type RegTokenHandler func(username string, token string) error
+type RegTokenHandler func(username string, token string, tx *badger.Txn) error
 
 type roundState struct {
 	masterPublicKey  *ibe.MasterPublicKey
@@ -61,11 +65,20 @@ type Config struct {
 	// DBPath is the path to the Badger database.
 	DBPath string
 
+	// Addr is the PKG's address (with port). Used in emails.
+	Addr string
+
 	// SigningKey is the PKG server's long-term signing key.
 	SigningKey ed25519.PrivateKey
 
 	// CoordinatorKey is the key that's authorized to start new PKG rounds.
 	CoordinatorKey ed25519.PublicKey
+
+	// RegistrarKey is the key that's authorized to preregister users.
+	RegistrarKey ed25519.PublicKey
+
+	// SMTPRelay is the SMTP relay used to send verification emails.
+	SMTPRelay SMTPRelay
 
 	// Logger is the logger used to write log messages. The standard logger
 	// is used if Logger is nil.
@@ -96,12 +109,18 @@ func NewServer(conf *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		db:              db,
-		log:             logger,
-		rounds:          make(map[uint32]*roundState),
-		privateKey:      conf.SigningKey,
-		publicKey:       conf.SigningKey.Public().(ed25519.PublicKey),
-		coordinatorKey:  conf.CoordinatorKey,
+		db:  db,
+		log: logger,
+
+		rounds: make(map[uint32]*roundState),
+
+		privateKey:     conf.SigningKey,
+		publicKey:      conf.SigningKey.Public().(ed25519.PublicKey),
+		coordinatorKey: conf.CoordinatorKey,
+		registrarKey:   conf.RegistrarKey,
+
+		addr:            conf.Addr,
+		smtpRelay:       conf.SMTPRelay,
 		regTokenHandler: conf.RegTokenHandler,
 	}
 	return s, nil
@@ -114,17 +133,22 @@ func (srv *Server) Close() error {
 // ServeHTTP implements an http.Handler that answers PKG requests.
 func (srv *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
-	case "/extract":
+	// Called by users:
+	case "/user/extract":
 		srv.extractHandler(w, r)
-	case "/status":
+	case "/user/status":
 		srv.statusHandler(w, r)
-	case "/register":
+	case "/user/register":
 		srv.registerHandler(w, r)
-	case "/commit":
+	// Called by coordinator:
+	case "/coordinator/commit":
 		srv.commitHandler(w, r)
-	case "/reveal":
+	case "/coordinator/reveal":
 		srv.revealHandler(w, r)
-	case "/userfilter":
+	// Called by registrar:
+	case "/registrar/preregister":
+		srv.preregisterHandler(w, r)
+	case "/registrar/userfilter":
 		srv.userFilterHandler(w, r)
 	default:
 		http.NotFound(w, r)
@@ -377,7 +401,7 @@ func (c *CoordinatorClient) NewRound(pkgs []PublicServerConfig, round uint32) (R
 		req := &pkgRequest{
 			PublicServerConfig: pkg,
 
-			Path:   "commit",
+			Path:   "coordinator/commit",
 			Args:   commitArgs,
 			Reply:  commitReply,
 			Client: c.client,
@@ -399,7 +423,7 @@ func (c *CoordinatorClient) NewRound(pkgs []PublicServerConfig, round uint32) (R
 		req := &pkgRequest{
 			PublicServerConfig: pkg,
 
-			Path:   "reveal",
+			Path:   "coordinator/reveal",
 			Args:   revealArgs,
 			Reply:  &reply,
 			Client: c.client,
@@ -422,22 +446,53 @@ func (c *CoordinatorClient) NewRound(pkgs []PublicServerConfig, round uint32) (R
 	return settings, nil
 }
 
+func (c *CoordinatorClient) PreregisterUser(username string, pkgs []PublicServerConfig) []error {
+	c.init()
+
+	errs := make([]error, len(pkgs))
+	done := make(chan error, len(pkgs))
+	for i := range pkgs {
+		i := i
+		req := &pkgRequest{
+			PublicServerConfig: pkgs[i],
+
+			Path: "registrar/preregister",
+			Args: &preregisterArgs{
+				Username: username,
+				PKGIndex: i + 1, // 1-indexed
+				NumPKGs:  len(pkgs),
+			},
+			Reply: new(string),
+
+			Client: c.client,
+		}
+		go func() {
+			errs[i] = req.Do()
+			done <- errs[i]
+		}()
+	}
+
+	for _ = range pkgs {
+		<-done
+	}
+	return errs
+}
+
 // ValidateUsername returns nil if username is a valid username,
 // otherwise returns an error that explains why the username is invalid.
 func ValidateUsername(username string) error {
 	if len(username) < 3 {
 		return errors.New("username must be at least 3 characters: %s", username)
 	}
-	if len(username) > 32 {
-		return errors.New("username must be 32 characters or less: %s", username)
+	if len(username) > 64 {
+		return errors.New("username must be 64 characters or less: %s", username)
 	}
-	for _, c := range username {
-		if c >= 'A' && c <= 'Z' {
-			return errors.New("username must be lowercase: %s", username)
-		}
-		if !validChar(c) {
-			return errors.New("invalid character in username: %c", c)
-		}
+	ix := strings.Index(username, "@")
+	if ix == -1 {
+		return errors.New("username must be a valid email address: %s", username)
+	}
+	if username != strings.ToLower(username) {
+		return errors.New("username must be lowercase: %s", username)
 	}
 	return nil
 }
@@ -457,16 +512,6 @@ func ValidUsernameToIdentity(username string) *[64]byte {
 	id := new([64]byte)
 	copy(id[:], []byte(username))
 	return id
-}
-
-func validChar(c rune) bool {
-	if c >= 'a' && c <= 'z' {
-		return true
-	}
-	if c >= '0' && c <= '9' {
-		return true
-	}
-	return false
 }
 
 func IdentityToUsername(identity *[64]byte) string {
