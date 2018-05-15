@@ -159,7 +159,10 @@ func TestMarshalAddFriendConfig(t *testing.T) {
 				Key:     guardianPub,
 				Address: "localhost:8888",
 			},
-			RegistrarHost: "vuvuzela.io",
+			Registrar: RegistrarConfig{
+				Key:     guardianPub,
+				Address: "vuvuzela.io",
+			},
 		},
 	}
 	sig := ed25519.Sign(guardianPriv, conf.SigningMessage())
@@ -311,8 +314,8 @@ func TestUnmarshalConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	addFriendConf := conf.Inner.(*AddFriendConfig)
-	if addFriendConf.RegistrarHost != "vuvuzela.io" {
-		t.Fatalf("invalid RegistrarHost: %q", addFriendConf.RegistrarHost)
+	if addFriendConf.Registrar.Address != "vuvuzela.io" {
+		t.Fatalf("invalid Registrar address: %q", addFriendConf.Registrar.Address)
 	}
 	if key := base32.EncodeToString(addFriendConf.PKGServers[0].Key); key != "5t8c7emvexkwg02yhqwksj7shc93sh3cat3yxk57ghqdr4hp7zq0" {
 		t.Fatalf("invalid PKG key: %q", key)

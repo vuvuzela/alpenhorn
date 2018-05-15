@@ -280,7 +280,7 @@ func init() {
 	RegisterService("Dialing", &DialingConfig{})
 }
 
-const AddFriendConfigVersion = 1
+const AddFriendConfigVersion = 2
 
 type AddFriendConfig struct {
 	Version     int
@@ -288,8 +288,13 @@ type AddFriendConfig struct {
 	PKGServers  []pkg.PublicServerConfig
 	MixServers  []mixnet.PublicServerConfig
 	CDNServer   CDNServerConfig
-	// RegistarHost is the server that PKGs use to verify registration tokens.
-	RegistrarHost string
+	Registrar   RegistrarConfig
+}
+
+//easyjson:readable
+type RegistrarConfig struct {
+	Key     ed25519.PublicKey
+	Address string
 }
 
 //easyjson:readable
@@ -315,6 +320,16 @@ type addFriendV1 struct {
 }
 
 //easyjson:readable
+type addFriendV2 struct {
+	Version     int
+	Coordinator keyAddr
+	PKGServers  []keyAddr
+	MixServers  []keyAddr
+	CDNServer   keyAddr
+	Registrar   keyAddr
+}
+
+//easyjson:readable
 type keyAddr struct {
 	Key     ed25519.PublicKey
 	Address string
@@ -327,7 +342,7 @@ func (c *AddFriendConfig) v1() (*addFriendV1, error) {
 		PKGServers:    make([]keyAddr, len(c.PKGServers)),
 		MixServers:    make([]keyAddr, len(c.MixServers)),
 		CDNServer:     keyAddr{c.CDNServer.Key, c.CDNServer.Address},
-		RegistrarHost: c.RegistrarHost,
+		RegistrarHost: c.Registrar.Address,
 	}
 	for i, srv := range c.PKGServers {
 		c1.PKGServers[i] = keyAddr{srv.Key, srv.Address}
@@ -336,6 +351,24 @@ func (c *AddFriendConfig) v1() (*addFriendV1, error) {
 		c1.MixServers[i] = keyAddr{srv.Key, srv.Address}
 	}
 	return c1, nil
+}
+
+func (c *AddFriendConfig) v2() (*addFriendV2, error) {
+	c2 := &addFriendV2{
+		Version:     2,
+		Coordinator: keyAddr{c.Coordinator.Key, c.Coordinator.Address},
+		PKGServers:  make([]keyAddr, len(c.PKGServers)),
+		MixServers:  make([]keyAddr, len(c.MixServers)),
+		CDNServer:   keyAddr{c.CDNServer.Key, c.CDNServer.Address},
+		Registrar:   keyAddr{c.Registrar.Key, c.Registrar.Address},
+	}
+	for i, srv := range c.PKGServers {
+		c2.PKGServers[i] = keyAddr{srv.Key, srv.Address}
+	}
+	for i, srv := range c.MixServers {
+		c2.MixServers[i] = keyAddr{srv.Key, srv.Address}
+	}
+	return c2, nil
 }
 
 func (c *AddFriendConfig) fromV1(c1 *addFriendV1) error {
@@ -350,7 +383,23 @@ func (c *AddFriendConfig) fromV1(c1 *addFriendV1) error {
 	for i, srv := range c1.MixServers {
 		c.MixServers[i] = mixnet.PublicServerConfig{Key: srv.Key, Address: srv.Address}
 	}
-	c.RegistrarHost = c1.RegistrarHost
+	c.Registrar.Address = c1.RegistrarHost
+	return nil
+}
+
+func (c *AddFriendConfig) fromV2(c2 *addFriendV2) error {
+	c.Version = 2
+	c.Coordinator = CoordinatorConfig{c2.Coordinator.Key, c2.Coordinator.Address}
+	c.PKGServers = make([]pkg.PublicServerConfig, len(c2.PKGServers))
+	c.MixServers = make([]mixnet.PublicServerConfig, len(c2.MixServers))
+	c.CDNServer = CDNServerConfig{c2.CDNServer.Key, c2.CDNServer.Address}
+	for i, srv := range c2.PKGServers {
+		c.PKGServers[i] = pkg.PublicServerConfig{Key: srv.Key, Address: srv.Address}
+	}
+	for i, srv := range c2.MixServers {
+		c.MixServers[i] = mixnet.PublicServerConfig{Key: srv.Key, Address: srv.Address}
+	}
+	c.Registrar = RegistrarConfig{c2.Registrar.Key, c2.Registrar.Address}
 	return nil
 }
 
@@ -401,6 +450,12 @@ func (c *AddFriendConfig) MarshalJSON() ([]byte, error) {
 			return nil, err
 		}
 		return json.Marshal(c1)
+	case 2:
+		c2, err := c.v2()
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(c2)
 	default:
 		return nil, errors.New("unknown AddFriendConfig version: %d", c.Version)
 	}
@@ -419,6 +474,13 @@ func (c *AddFriendConfig) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		return c.fromV1(c1)
+	case 2:
+		c2 := new(addFriendV2)
+		err := json.Unmarshal(data, c2)
+		if err != nil {
+			return err
+		}
+		return c.fromV2(c2)
 	default:
 		return errors.New("unknown AddFriendConfig version: %d", version)
 	}
