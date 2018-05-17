@@ -45,6 +45,7 @@ func main() {
 	confHash := conf.Hash()
 
 	if !*printCurrent {
+		conf.Inner.UseLatestVersion()
 		valid := conf.Expires.Sub(conf.Created)
 		conf.Created = time.Now()
 		conf.Expires = conf.Created.Add(valid)
