@@ -53,6 +53,8 @@ type SignedConfig struct {
 type InnerConfig interface {
 	Validate() error
 
+	UseLatestVersion()
+
 	// The InnerConfig must be marshalable as JSON.
 }
 
@@ -291,6 +293,10 @@ type AddFriendConfig struct {
 	Registrar   RegistrarConfig
 }
 
+func (c *AddFriendConfig) UseLatestVersion() {
+	c.Version = AddFriendConfigVersion
+}
+
 //easyjson:readable
 type RegistrarConfig struct {
 	Key     ed25519.PublicKey
@@ -493,6 +499,10 @@ type DialingConfig struct {
 	Coordinator CoordinatorConfig
 	MixServers  []mixnet.PublicServerConfig
 	CDNServer   CDNServerConfig
+}
+
+func (c *DialingConfig) UseLatestVersion() {
+	c.Version = DialingConfigVersion
 }
 
 //easyjson:readable

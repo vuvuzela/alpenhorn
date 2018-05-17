@@ -21,7 +21,8 @@ import (
 
 type trivialInner struct{}
 
-func (x trivialInner) Validate() error { return nil }
+func (x trivialInner) Validate() error   { return nil }
+func (x trivialInner) UseLatestVersion() {}
 
 func TestVerify(t *testing.T) {
 	gA, gApriv := newGuardian("A")
