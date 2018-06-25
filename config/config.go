@@ -420,7 +420,7 @@ func (c *AddFriendConfig) UnmarshalJSON(data []byte) error {
 		}
 		return c.fromV1(c1)
 	default:
-		return errors.New("unknown AddFriendConfig version: %d", c.Version)
+		return errors.New("unknown AddFriendConfig version: %d", version)
 	}
 }
 
@@ -492,7 +492,7 @@ func (c *DialingConfig) UnmarshalJSON(data []byte) error {
 		}
 		return c.fromV1(c1)
 	default:
-		return errors.New("unknown DialingConfig version: %d", c.Version)
+		return errors.New("unknown DialingConfig version: %d", version)
 	}
 }
 
