@@ -127,8 +127,8 @@ func main() {
 		log.Fatal(err)
 	}
 	addFriendConfig := signedConfig.Inner.(*config.AddFriendConfig)
-	if addFriendConfig.RegistrarHost == "" {
-		log.Fatal("no RegistrarHost defined in current addfriend config!")
+	if addFriendConfig.Registrar.Address == "" {
+		log.Fatal("no Registrar Address defined in current addfriend config!")
 	}
 
 	pkgConfig := &pkg.Config{
@@ -142,7 +142,7 @@ func main() {
 			EntryHandler: logHandler,
 		},
 
-		RegTokenHandler: pkg.ExternalVerifier(fmt.Sprintf("https://%s/verify", addFriendConfig.RegistrarHost)),
+		RegTokenHandler: pkg.ExternalVerifier(fmt.Sprintf("https://%s/verify", addFriendConfig.Registrar.Address)),
 	}
 	pkgServer, err := pkg.NewServer(pkgConfig)
 	if err != nil {
