@@ -124,8 +124,8 @@ func TestAliceFriendsThenCallsBob(t *testing.T) {
 		u.Destroy()
 	}()
 
-	alice := u.newUser("alice")
-	bob := u.newUser("bob")
+	alice := u.newUser("alice@example.org")
+	bob := u.newUser("bob@example.org")
 	bob.ClientPersistPath = filepath.Join(u.Dir, "bob-client")
 	bob.KeywheelPersistPath = filepath.Join(u.Dir, "bob-keywheel")
 

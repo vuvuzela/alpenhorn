@@ -47,9 +47,10 @@ func TestSingleClient(t *testing.T) {
 	})
 	defer testpkg.Close()
 
+	aliceUsername := "alice@example.org"
 	alicePub, alicePriv, _ := ed25519.GenerateKey(rand.Reader)
 	client := &pkg.Client{
-		Username:        "alice",
+		Username:        aliceUsername,
 		LoginKey:        alicePriv,
 		UserLongTermKey: alicePub,
 		HTTPClient:      new(edhttp.Client),
@@ -75,7 +76,7 @@ func TestSingleClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	aliceLog, err := testpkg.PKGServer.GetUserLog(pkg.ValidUsernameToIdentity("alice"))
+	aliceLog, err := testpkg.PKGServer.GetUserLog(pkg.ValidUsernameToIdentity(aliceUsername))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestSingleClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !(len(usernames) == 1 && bytes.Equal(usernames[0][:], pkg.ValidUsernameToIdentity("alice")[:])) {
+	if !(len(usernames) == 1 && bytes.Equal(usernames[0][:], pkg.ValidUsernameToIdentity(aliceUsername)[:])) {
 		t.Fatalf("unexpected registered usernames: %v", usernames)
 	}
 
@@ -131,7 +132,7 @@ func TestSingleClient(t *testing.T) {
 	}
 
 	masterKey := revealReply.MasterPublicKey
-	aliceID, _ := pkg.UsernameToIdentity("alice")
+	aliceID, _ := pkg.UsernameToIdentity(aliceUsername)
 	encintro := ibe.Encrypt(rand.Reader, masterKey, aliceID[:], []byte("Hello Alice!"))
 	intro, ok := ibe.Decrypt(result1.PrivateKey, encintro)
 	if !ok {
@@ -159,7 +160,7 @@ func TestManyClients(t *testing.T) {
 		for i := 0; i < usersPerThread; i++ {
 			userPub, userPriv, _ := ed25519.GenerateKey(rand.Reader)
 			clients[thread*usersPerThread+i] = &pkg.Client{
-				Username:        fmt.Sprintf("%dthread%d", i, thread),
+				Username:        fmt.Sprintf("%dthread%d@example.org", i, thread),
 				LoginKey:        userPriv,
 				UserLongTermKey: userPub,
 				HTTPClient:      new(edhttp.Client),
