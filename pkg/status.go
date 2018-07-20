@@ -103,7 +103,10 @@ func (srv *Server) RegisteredUsernames() ([]*[64]byte, error) {
 }
 
 func (srv *Server) userFilterHandler(w http.ResponseWriter, req *http.Request) {
-	// TODO add some authentication
+	if !srv.authorized(srv.registrarKey, w, req) {
+		return
+	}
+
 	usernames, err := srv.RegisteredUsernames()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

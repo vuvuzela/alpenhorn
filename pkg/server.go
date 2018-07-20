@@ -42,6 +42,7 @@ type Server struct {
 	privateKey     ed25519.PrivateKey
 	publicKey      ed25519.PublicKey
 	coordinatorKey ed25519.PublicKey
+	registrarKey   ed25519.PublicKey
 
 	regTokenHandler RegTokenHandler
 }
@@ -66,6 +67,9 @@ type Config struct {
 
 	// CoordinatorKey is the key that's authorized to start new PKG rounds.
 	CoordinatorKey ed25519.PublicKey
+
+	// RegistrarKey is the key that's authorized to check user availability.
+	RegistrarKey ed25519.PublicKey
 
 	// Logger is the logger used to write log messages. The standard logger
 	// is used if Logger is nil.
@@ -96,12 +100,16 @@ func NewServer(conf *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		db:              db,
-		log:             logger,
-		rounds:          make(map[uint32]*roundState),
-		privateKey:      conf.SigningKey,
-		publicKey:       conf.SigningKey.Public().(ed25519.PublicKey),
-		coordinatorKey:  conf.CoordinatorKey,
+		db:  db,
+		log: logger,
+
+		rounds: make(map[uint32]*roundState),
+
+		privateKey:     conf.SigningKey,
+		publicKey:      conf.SigningKey.Public().(ed25519.PublicKey),
+		coordinatorKey: conf.CoordinatorKey,
+		registrarKey:   conf.RegistrarKey,
+
 		regTokenHandler: conf.RegTokenHandler,
 	}
 	return s, nil

@@ -136,6 +136,7 @@ func main() {
 		SigningKey: conf.PrivateKey,
 
 		CoordinatorKey: addFriendConfig.Coordinator.Key,
+		RegistrarKey:   addFriendConfig.Registrar.Key,
 
 		Logger: &log.Logger{
 			Level:        log.InfoLevel,
