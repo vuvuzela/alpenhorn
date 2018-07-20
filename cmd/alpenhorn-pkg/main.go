@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"text/template"
 	"time"
@@ -30,17 +31,15 @@ import (
 )
 
 var (
-	confPath = flag.String("conf", "", "config file")
-	doinit   = flag.Bool("init", false, "create config file")
+	doinit      = flag.Bool("init", false, "create config file")
+	persistPath = flag.String("persist", "persist_pkg", "persistent data directory")
 )
 
 type Config struct {
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
 
-	DBPath     string // path to the Badger DB
 	ListenAddr string
-	LogsDir    string
 }
 
 var funcMap = template.FuncMap{
@@ -52,9 +51,7 @@ const confTemplate = `# Alpenhorn PKG server config
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
 
-dbPath = {{.DBPath | printf "%q"}}
 listenAddr = {{.ListenAddr | printf "%q"}}
-logsDir = {{.LogsDir | printf "%q" }}
 `
 
 func writeNewConfig() {
@@ -67,9 +64,6 @@ func writeNewConfig() {
 		PublicKey:  publicKey,
 		PrivateKey: privateKey,
 
-		LogsDir: alplog.DefaultLogsDir("alpenhorn-pkg", publicKey),
-
-		DBPath:     "pkg_data",
 		ListenAddr: "0.0.0.0:80",
 	}
 
@@ -82,7 +76,7 @@ func writeNewConfig() {
 	}
 	data := buf.Bytes()
 
-	path := "pkg-init.conf"
+	path := filepath.Join(*persistPath, "pkg.conf")
 	err = ioutil.WriteFile(path, data, 0600)
 	if err != nil {
 		log.Fatal(err)
@@ -93,31 +87,33 @@ func writeNewConfig() {
 func main() {
 	flag.Parse()
 
+	if err := os.MkdirAll(*persistPath, 0700); err != nil {
+		log.Fatal(err)
+		return
+	}
+
 	if *doinit {
 		writeNewConfig()
 		return
 	}
 
-	if *confPath == "" {
-		fmt.Println("specify config file with -conf")
-		os.Exit(1)
-	}
-
-	data, err := ioutil.ReadFile(*confPath)
+	confPath := filepath.Join(*persistPath, "pkg.conf")
+	data, err := ioutil.ReadFile(confPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	conf := new(Config)
 	err = toml.Unmarshal(data, conf)
 	if err != nil {
-		log.Fatalf("error parsing config %q: %s", *confPath, err)
+		log.Fatalf("error parsing config %q: %s", confPath, err)
 	}
 	err = checkConfig(conf)
 	if err != nil {
 		log.Fatalf("invalid config: %s", err)
 	}
 
-	logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
+	logsDir := filepath.Join(*persistPath, "logs")
+	logHandler, err := alplog.NewProductionOutput(logsDir)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -131,8 +127,13 @@ func main() {
 		log.Fatal("no Registrar Address defined in current addfriend config!")
 	}
 
+	dbPath := filepath.Join(*persistPath, "db")
+	if err := os.MkdirAll(dbPath, 0700); err != nil {
+		log.Fatal(err)
+	}
+
 	pkgConfig := &pkg.Config{
-		DBPath:     conf.DBPath,
+		DBPath:     dbPath,
 		SigningKey: conf.PrivateKey,
 
 		CoordinatorKey: addFriendConfig.Coordinator.Key,
@@ -207,9 +208,6 @@ func checkConfig(conf *Config) error {
 	expectedPub := conf.PrivateKey.Public().(ed25519.PublicKey)
 	if !bytes.Equal(expectedPub, conf.PublicKey) {
 		return errors.New("public key does not correspond to private key")
-	}
-	if err := os.MkdirAll(conf.DBPath, 0700); err != nil {
-		return err
 	}
 	return nil
 }
