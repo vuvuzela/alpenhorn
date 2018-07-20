@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	golog "log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -157,8 +158,18 @@ func main() {
 		}
 	}()
 
+	errorLogPath := filepath.Join(*persistPath, "http_errors.log")
+	errorFile, err := os.OpenFile(errorLogPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0660)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer errorFile.Close()
+	errorLog := golog.New(errorFile, "", golog.LstdFlags|golog.LUTC|golog.Lshortfile)
+
 	httpServer := &http.Server{
-		Handler:      pkgServer,
+		Handler:  pkgServer,
+		ErrorLog: errorLog,
+
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
