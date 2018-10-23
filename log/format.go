@@ -87,11 +87,12 @@ func (h *OutputText) Fire(e *Entry) {
 
 func (h *OutputText) prettyPrint(buf *bytes.Buffer, e *Entry) {
 	color := e.Level.Color()
+	timeFmt := "2006-01-02 15:04:05.000"
 	if e.Level == InfoLevel || h.DisableColors {
 		// Colorful timestamps on info messages is too distracting.
-		buf.WriteString(e.Time.Format("2006-01-02 15:04:05"))
+		buf.WriteString(e.Time.Format(timeFmt))
 	} else {
-		ansi.WriteString(buf, e.Time.Format("2006-01-02 15:04:05"), color, ansi.Bold)
+		ansi.WriteString(buf, e.Time.Format(timeFmt), color, ansi.Bold)
 	}
 	fmt.Fprintf(buf, " %s %-44s ", e.Level.Icon(), e.Message)
 	if h.DisableColors {
