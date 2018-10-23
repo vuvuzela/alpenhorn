@@ -21,6 +21,7 @@ import (
 
 	"golang.org/x/crypto/ed25519"
 
+	"vuvuzela.io/alpenhorn/cmd/cmdutil"
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
@@ -55,7 +56,7 @@ privateKey = {{.PrivateKey | base32 | printf "%q"}}
 listenAddr = {{.ListenAddr | printf "%q"}}
 `
 
-func writeNewConfig() {
+func writeNewConfig(path string) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		panic(err)
@@ -77,7 +78,6 @@ func writeNewConfig() {
 	}
 	data := buf.Bytes()
 
-	path := filepath.Join(*persistPath, "pkg.conf")
 	err = ioutil.WriteFile(path, data, 0600)
 	if err != nil {
 		log.Fatal(err)
@@ -92,13 +92,15 @@ func main() {
 		log.Fatal(err)
 		return
 	}
+	confPath := filepath.Join(*persistPath, "pkg.conf")
 
 	if *doinit {
-		writeNewConfig()
+		if cmdutil.Overwrite(confPath) {
+			writeNewConfig(confPath)
+		}
 		return
 	}
 
-	confPath := filepath.Join(*persistPath, "pkg.conf")
 	data, err := ioutil.ReadFile(confPath)
 	if err != nil {
 		log.Fatal(err)
