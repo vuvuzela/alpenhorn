@@ -11,11 +11,13 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 	"text/template"
 
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/cdn"
+	"vuvuzela.io/alpenhorn/cmd/cmdutil"
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
@@ -25,16 +27,15 @@ import (
 )
 
 var (
-	confPath = flag.String("conf", "", "config file")
-	doinit   = flag.Bool("init", false, "create config file")
+	doinit      = flag.Bool("init", false, "create config file")
+	persistPath = flag.String("persist", "persist_cdn", "persistent data directory")
 )
 
 type Config struct {
 	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
-	DBPath     string
+
 	ListenAddr string
-	LogsDir    string
 }
 
 var funcMap = template.FuncMap{
@@ -46,12 +47,10 @@ const confTemplate = `# Alpenhorn CDN config
 publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
 
-dbPath = {{.DBPath | printf "%q" }}
 listenAddr = {{.ListenAddr | printf "%q" }}
-logsDir = {{.LogsDir | printf "%q" }}
 `
 
-func writeNewConfig() {
+func writeNewConfig(path string) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		panic(err)
@@ -61,9 +60,7 @@ func writeNewConfig() {
 		PublicKey:  publicKey,
 		PrivateKey: privateKey,
 
-		DBPath:     "cdn_data",
 		ListenAddr: "0.0.0.0:8080",
-		LogsDir:    alplog.DefaultLogsDir("alpenhorn-cdn", publicKey),
 	}
 
 	tmpl := template.Must(template.New("config").Funcs(funcMap).Parse(confTemplate))
@@ -75,7 +72,6 @@ func writeNewConfig() {
 	}
 	data := buf.Bytes()
 
-	path := "cdn-init.conf"
 	err = ioutil.WriteFile(path, data, 0600)
 	if err != nil {
 		log.Fatal(err)
@@ -86,31 +82,34 @@ func writeNewConfig() {
 func main() {
 	flag.Parse()
 
+	if err := os.MkdirAll(*persistPath, 0700); err != nil {
+		log.Fatal(err)
+	}
+	confPath := filepath.Join(*persistPath, "cdn.conf")
+
 	if *doinit {
-		writeNewConfig()
+		if cmdutil.Overwrite(confPath) {
+			writeNewConfig(confPath)
+		}
 		return
 	}
 
-	if *confPath == "" {
-		fmt.Println("specify config file with -conf")
-		os.Exit(1)
-	}
-
-	data, err := ioutil.ReadFile(*confPath)
+	data, err := ioutil.ReadFile(confPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	conf := new(Config)
 	err = toml.Unmarshal(data, conf)
 	if err != nil {
-		log.Fatalf("error parsing config %q: %s", *confPath, err)
+		log.Fatalf("error parsing config %q: %s", confPath, err)
 	}
 
 	if conf.ListenAddr == "" {
 		log.Fatal("empty listen address in config")
 	}
 
-	logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
+	logsDir := filepath.Join(*persistPath, "logs")
+	logHandler, err := alplog.NewProductionOutput(logsDir)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -121,7 +120,11 @@ func main() {
 	}
 	addFriendConfig := signedConfig.Inner.(*config.AddFriendConfig)
 
-	server, err := cdn.New(conf.DBPath, addFriendConfig.Coordinator.Key)
+	dbPath := filepath.Join(*persistPath, "db")
+	if err := os.MkdirAll(dbPath, 0700); err != nil {
+		log.Fatal(err)
+	}
+	server, err := cdn.New(dbPath, addFriendConfig.Coordinator.Key)
 	if err != nil {
 		log.Fatal(err)
 	}

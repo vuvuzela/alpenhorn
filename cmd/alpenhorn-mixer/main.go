@@ -11,6 +11,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"path/filepath"
 	"text/template"
 
 	"golang.org/x/crypto/ed25519"
@@ -18,11 +19,11 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"vuvuzela.io/alpenhorn/addfriend"
+	"vuvuzela.io/alpenhorn/cmd/cmdutil"
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/dialing"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/encoding/toml"
-	"vuvuzela.io/alpenhorn/internal/alplog"
 	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/crypto/rand"
 	"vuvuzela.io/vuvuzela/mixnet"
@@ -30,8 +31,8 @@ import (
 )
 
 var (
-	confPath = flag.String("conf", "", "config file")
-	doinit   = flag.Bool("init", false, "create config file")
+	doinit      = flag.Bool("init", false, "create config file")
+	persistPath = flag.String("persist", "persist_alpmix", "persistent data directory")
 )
 
 type Config struct {
@@ -39,7 +40,6 @@ type Config struct {
 	PrivateKey ed25519.PrivateKey
 
 	ListenAddr string
-	LogsDir    string
 
 	AddFriendNoise rand.Laplace
 	DialingNoise   rand.Laplace
@@ -55,7 +55,6 @@ publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
 
 listenAddr = {{.ListenAddr | printf "%q"}}
-logsDir = {{.LogsDir | printf "%q" }}
 
 [addFriendNoise]
 mu = {{.AddFriendNoise.Mu | printf "%0.1f"}}
@@ -66,7 +65,7 @@ mu = {{.DialingNoise.Mu | printf "%0.1f"}}
 b = {{.DialingNoise.B | printf "%0.1f"}}
 `
 
-func writeNewConfig() {
+func writeNewConfig(path string) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		panic(err)
@@ -76,8 +75,6 @@ func writeNewConfig() {
 		ListenAddr: "0.0.0.0:28000",
 		PublicKey:  publicKey,
 		PrivateKey: privateKey,
-
-		LogsDir: alplog.DefaultLogsDir("alpenhorn-mixer", publicKey),
 
 		AddFriendNoise: rand.Laplace{
 			Mu: 100,
@@ -99,7 +96,6 @@ func writeNewConfig() {
 	}
 	data := buf.Bytes()
 
-	path := "mixer-init.conf"
 	err = ioutil.WriteFile(path, data, 0600)
 	if err != nil {
 		log.Fatal(err)
@@ -110,24 +106,26 @@ func writeNewConfig() {
 func main() {
 	flag.Parse()
 
+	if err := os.MkdirAll(*persistPath, 0700); err != nil {
+		log.Fatal(err)
+	}
+	confPath := filepath.Join(*persistPath, "mixer.conf")
+
 	if *doinit {
-		writeNewConfig()
+		if cmdutil.Overwrite(confPath) {
+			writeNewConfig(confPath)
+		}
 		return
 	}
 
-	if *confPath == "" {
-		fmt.Println("specify config file with -conf")
-		os.Exit(1)
-	}
-
-	data, err := ioutil.ReadFile(*confPath)
+	data, err := ioutil.ReadFile(confPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	conf := new(Config)
 	err = toml.Unmarshal(data, conf)
 	if err != nil {
-		log.Fatalf("error parsing config %q: %s", *confPath, err)
+		log.Fatalf("error parsing config %q: %s", confPath, err)
 	}
 
 	/*

@@ -12,7 +12,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -20,6 +19,7 @@ import (
 
 	"golang.org/x/crypto/ed25519"
 
+	"vuvuzela.io/alpenhorn/cmd/cmdutil"
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/coordinator"
 	"vuvuzela.io/alpenhorn/edtls"
@@ -29,7 +29,8 @@ import (
 )
 
 var (
-	doInit = flag.Bool("init", false, "initialize the coordinator for the first time")
+	doInit      = flag.Bool("init", false, "initialize the coordinator for the first time")
+	persistPath = flag.String("persist", "persist", "persistent data directory")
 )
 
 type Config struct {
@@ -37,7 +38,6 @@ type Config struct {
 	PrivateKey ed25519.PrivateKey
 
 	ListenAddr string
-	LogsDir    string
 
 	AddFriendDelay time.Duration
 	DialingDelay   time.Duration
@@ -58,7 +58,6 @@ publicKey  = {{.PublicKey | base32 | printf "%q"}}
 privateKey = {{.PrivateKey | base32 | printf "%q"}}
 
 listenAddr = {{.ListenAddr | printf "%q"}}
-logsDir = {{.LogsDir | printf "%q" }}
 
 addFriendDelay = {{.AddFriendDelay | printf "%q"}}
 dialingDelay   = {{.DialingDelay | printf "%q"}}
@@ -75,11 +74,11 @@ addFriendMailboxes = {{.AddFriendMailboxes}}
 dialingMailboxes   = {{.DialingMailboxes}}
 `
 
-func initService(service string, confHome string) {
+func initService(service string) {
 	fmt.Printf("--> Initializing %q service.\n", service)
-	coordinatorPersistPath := filepath.Join(confHome, strings.ToLower(service)+"-coordinator-state")
+	servicePersistPath := filepath.Join(*persistPath, strings.ToLower(service)+"-coordinator-state")
 
-	doCoordinator := overwrite(coordinatorPersistPath)
+	doCoordinator := cmdutil.Overwrite(servicePersistPath)
 
 	if !doCoordinator {
 		fmt.Println("Nothing to do.")
@@ -88,39 +87,26 @@ func initService(service string, confHome string) {
 
 	server := &coordinator.Server{
 		Service:     service,
-		PersistPath: coordinatorPersistPath,
+		PersistPath: servicePersistPath,
 	}
 	err := server.Persist()
 	if err != nil {
 		log.Fatalf("failed to create coordinator server state for service %q: %s", service, err)
 	}
 
-	fmt.Printf("! Wrote coordinator server state: %s\n", coordinatorPersistPath)
+	fmt.Printf("! Wrote coordinator server state: %s\n", servicePersistPath)
 }
 
-func initCoordinator() {
-	u, err := user.Current()
-	if err != nil {
-		log.Fatal(err)
-	}
-	confHome := filepath.Join(u.HomeDir, ".alpenhorn")
-
-	err = os.Mkdir(confHome, 0700)
-	if err == nil {
-		fmt.Printf("Created directory %s\n", confHome)
-	} else if !os.IsExist(err) {
-		log.Fatal(err)
-	}
-
-	initService("AddFriend", confHome)
-	initService("Dialing", confHome)
-
+func initCoordinator(confPath string) {
 	fmt.Printf("--> Generating coordinator key pair and config.\n")
-	confPath := filepath.Join(confHome, "coordinator.conf")
-	if overwrite(confPath) {
+	if cmdutil.Overwrite(confPath) {
 		writeNewConfig(confPath)
 		fmt.Printf("--> Please edit the config file before running the server.\n")
 	}
+
+	initService("AddFriend")
+	initService("Dialing")
+
 }
 
 func writeNewConfig(path string) {
@@ -134,7 +120,6 @@ func writeNewConfig(path string) {
 		PrivateKey: privateKey,
 
 		ListenAddr: "0.0.0.0:8000",
-		LogsDir:    alplog.DefaultLogsDir("alpenhorn-coordinator", publicKey),
 
 		AddFriendDelay: 10 * time.Second,
 		DialingDelay:   5 * time.Second,
@@ -163,18 +148,16 @@ func writeNewConfig(path string) {
 func main() {
 	flag.Parse()
 
+	if err := os.MkdirAll(*persistPath, 0700); err != nil {
+		log.Fatal(err)
+	}
+	confPath := filepath.Join(*persistPath, "coordinator.conf")
+
 	if *doInit {
-		initCoordinator()
+		initCoordinator(confPath)
 		return
 	}
 
-	u, err := user.Current()
-	if err != nil {
-		log.Fatal(err)
-	}
-	confHome := filepath.Join(u.HomeDir, ".alpenhorn")
-
-	confPath := filepath.Join(confHome, "coordinator.conf")
 	data, err := ioutil.ReadFile(confPath)
 	if err != nil {
 		log.Fatal(err)
@@ -185,7 +168,8 @@ func main() {
 		log.Fatalf("error parsing config %s: %s", confPath, err)
 	}
 
-	logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
+	logsDir := filepath.Join(*persistPath, "logs")
+	logHandler, err := alplog.NewProductionOutput(logsDir)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -209,7 +193,7 @@ func main() {
 
 			NumMailboxes: conf.AddFriendMailboxes,
 
-			PersistPath: filepath.Join(confHome, "addfriend-coordinator-state"),
+			PersistPath: filepath.Join(*persistPath, "addfriend-coordinator-state"),
 		}
 
 		err = addFriendServer.LoadPersistedState()
@@ -233,7 +217,7 @@ func main() {
 
 			NumMailboxes: conf.DialingMailboxes,
 
-			PersistPath: filepath.Join(confHome, "dialing-coordinator-state"),
+			PersistPath: filepath.Join(*persistPath, "dialing-coordinator-state"),
 		}
 
 		err = dialingServer.LoadPersistedState()
@@ -269,28 +253,4 @@ func main() {
 	if err != nil {
 		logger.Fatalf("Shutdown: %s", err)
 	}
-}
-
-func overwrite(path string) bool {
-	_, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return true
-	}
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("%s already exists.\n", path)
-	fmt.Printf("Overwrite (y/N)? ")
-	var yesno [3]byte
-	n, err := os.Stdin.Read(yesno[:])
-	if err != nil {
-		log.Fatal(err)
-	}
-	if n == 0 {
-		return false
-	}
-	if yesno[0] != 'y' && yesno[0] != 'Y' {
-		return false
-	}
-	return true
 }

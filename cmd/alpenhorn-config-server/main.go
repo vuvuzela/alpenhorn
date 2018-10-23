@@ -13,7 +13,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/user"
 	"path/filepath"
 	"time"
 
@@ -24,21 +23,22 @@ import (
 	_ "vuvuzela.io/vuvuzela/convo"
 )
 
-var hostname = flag.String("hostname", "", "hostname of config server")
-var setConfigPath = flag.String("setConfig", "", "path to signed config to make current")
+var (
+	hostname      = flag.String("hostname", "", "hostname of config server")
+	setConfigPath = flag.String("setConfig", "", "path to signed config to make current")
+	persistPath   = flag.String("persist", "persist_config_server", "persistent data directory")
+)
 
 func main() {
 	flag.Parse()
 
-	u, err := user.Current()
-	if err != nil {
+	if err := os.MkdirAll(*persistPath, 0700); err != nil {
 		log.Fatal(err)
 	}
-	confHome := filepath.Join(u.HomeDir, ".alpenhorn")
-	serverPath := filepath.Join(confHome, "config-server-state")
+	serverPath := filepath.Join(*persistPath, "config-server-state")
 
 	if *setConfigPath != "" {
-		setConfig(confHome, serverPath)
+		setConfig(serverPath)
 		return
 	}
 
@@ -56,7 +56,7 @@ func main() {
 	}
 
 	certManager := autocert.Manager{
-		Cache:      autocert.DirCache(filepath.Join(confHome, "config-server-keys")),
+		Cache:      autocert.DirCache(filepath.Join(*persistPath, "ssl")),
 		Prompt:     autocert.AcceptTOS,
 		HostPolicy: autocert.HostWhitelist(*hostname),
 	}
@@ -75,7 +75,7 @@ func main() {
 	log.Fatal(httpServer.ListenAndServeTLS("", ""))
 }
 
-func setConfig(confHome, serverPath string) {
+func setConfig(serverPath string) {
 	data, err := ioutil.ReadFile(*setConfigPath)
 	if err != nil {
 		log.Fatal(err)
@@ -95,13 +95,6 @@ func setConfig(confHome, serverPath string) {
 		}
 		fmt.Printf("Set current %q config in existing server state.\n", conf.Service)
 	} else if os.IsNotExist(err) {
-		err := os.Mkdir(confHome, 0700)
-		if err == nil {
-			fmt.Printf("Created directory %s\n", confHome)
-		} else if !os.IsExist(err) {
-			log.Fatal(err)
-		}
-
 		server, err := config.CreateServer(serverPath)
 		if err != nil {
 			log.Fatalf("error creating server state: %s", err)
