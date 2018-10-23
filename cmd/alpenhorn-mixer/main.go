@@ -128,13 +128,6 @@ func main() {
 		log.Fatalf("error parsing config %q: %s", confPath, err)
 	}
 
-	/*
-		logHandler, err := alplog.NewProductionOutput(conf.LogsDir)
-		if err != nil {
-			log.Fatal(err)
-		}
-	*/
-
 	signedConfig, err := config.StdClient.CurrentConfig("AddFriend")
 	if err != nil {
 		log.Fatal(err)
@@ -165,7 +158,6 @@ func main() {
 	pb.RegisterMixnetServer(grpcServer, mixServer)
 
 	log.Infof("Listening on %q", conf.ListenAddr)
-	//log.Infof("Listening on %q; logging to %s", conf.ListenAddr, logHandler.Name())
 
 	listener, err := net.Listen("tcp", conf.ListenAddr)
 	if err != nil {
