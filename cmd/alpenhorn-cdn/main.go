@@ -120,10 +120,7 @@ func main() {
 	}
 	addFriendConfig := signedConfig.Inner.(*config.AddFriendConfig)
 
-	dbPath := filepath.Join(*persistPath, "db")
-	if err := os.MkdirAll(dbPath, 0700); err != nil {
-		log.Fatal(err)
-	}
+	dbPath := filepath.Join(*persistPath, "bolt_db")
 	server, err := cdn.New(dbPath, addFriendConfig.Coordinator.Key)
 	if err != nil {
 		log.Fatal(err)
