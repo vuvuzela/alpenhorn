@@ -154,10 +154,7 @@ func (srv *Server) GetUserLog(identity *[64]byte) (UserEventLog, error) {
 		err = item.Value(func(data []byte) error {
 			return log.Unmarshal(data)
 		})
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	})
 	return log, err
 }
