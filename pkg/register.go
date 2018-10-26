@@ -99,7 +99,7 @@ func (srv *Server) register(args *registerArgs) error {
 		return err
 	}
 
-	err = tx.Commit(nil)
+	err = tx.Commit()
 	if err != nil {
 		return errorf(ErrDatabaseError, "%s", err)
 	}
