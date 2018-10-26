@@ -128,13 +128,11 @@ func appendLog(tx *badger.Txn, identity *[64]byte, event UserEvent) error {
 	} else if err != nil {
 		return errorf(ErrDatabaseError, "%s", err)
 	} else {
-		data, err := item.Value()
+		err := item.Value(func(data []byte) error {
+			return json.Unmarshal(data, currLog)
+		})
 		if err != nil {
 			return errorf(ErrDatabaseError, "%s", err)
-		}
-		err = json.Unmarshal(data, currLog)
-		if err != nil {
-			return errorf(ErrDatabaseError, "invalid user log: %s", err)
 		}
 	}
 
@@ -153,11 +151,13 @@ func (srv *Server) GetUserLog(identity *[64]byte) (UserEventLog, error) {
 		if err != nil {
 			return err
 		}
-		data, err := item.Value()
+		err = item.Value(func(data []byte) error {
+			return log.Unmarshal(data)
+		})
 		if err != nil {
 			return err
 		}
-		return log.Unmarshal(data)
+		return nil
 	})
 	return log, err
 }
