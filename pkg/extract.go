@@ -219,12 +219,11 @@ func (srv *Server) getUser(tx *badger.Txn, username string) (user userState, id 
 	if err != nil {
 		return user, id, errorf(ErrDatabaseError, "%s", err)
 	}
-	data, err := item.Value()
+	err = item.Value(func(data []byte) error {
+		return user.Unmarshal(data)
+	})
 	if err != nil {
 		return user, id, errorf(ErrDatabaseError, "%s", err)
-	}
-	if err := user.Unmarshal(data); err != nil {
-		return user, id, errorf(ErrDatabaseError, "invalid user state: %s", err)
 	}
 	return user, id, nil
 }
