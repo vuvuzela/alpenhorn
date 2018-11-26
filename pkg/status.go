@@ -84,6 +84,8 @@ func (srv *Server) RegisteredUsernames() ([]*[64]byte, error) {
 	err := srv.db.View(func(tx *badger.Txn) error {
 		opt := badger.DefaultIteratorOptions
 		it := tx.NewIterator(opt)
+		defer it.Close()
+
 		for it.Seek(dbUserPrefix); it.ValidForPrefix(dbUserPrefix); it.Next() {
 			key := it.Item().Key()
 			if !bytes.HasSuffix(key, registrationSuffix) {
