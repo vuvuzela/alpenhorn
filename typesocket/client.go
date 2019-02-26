@@ -68,6 +68,7 @@ func (c *ClientConn) pongHandler(message string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.latency = time.Now().Sub(c.lastPing)
+	log.WithFields(log.Fields{"latency": c.latency}).Info("updated latency")
 	return nil
 }
 
