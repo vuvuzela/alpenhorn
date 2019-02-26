@@ -7,7 +7,6 @@ package alpenhorn
 import (
 	"bytes"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,6 +26,7 @@ import (
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/crypto/rand"
 	"vuvuzela.io/internal/debug"
+	sharedMock "vuvuzela.io/internal/mock"
 )
 
 type chanHandler struct {
@@ -440,9 +440,8 @@ var logger = &log.Logger{
 type universe struct {
 	Dir string
 
-	ConfigServer     *config.Server
-	ConfigClient     *config.Client
-	configHTTPServer *http.Server
+	ConfigServer *config.Server
+	ConfigClient *config.Client
 
 	CDN      *mock.CDN
 	Mixchain *mock.Mixchain
@@ -474,26 +473,7 @@ func createAlpenhornUniverse() *universe {
 		log.Panicf("ioutil.TempDir: %s", err)
 	}
 
-	u.ConfigServer, err = config.CreateServer(filepath.Join(u.Dir, "config-server-state"))
-	if err != nil {
-		log.Panicf("config.CreateServer: %s", err)
-	}
-	configListener, err := net.Listen("tcp", "localhost:0")
-	if err != nil {
-		log.Panic(err)
-	}
-	u.configHTTPServer = &http.Server{
-		Handler: u.ConfigServer,
-	}
-	go func() {
-		err := u.configHTTPServer.Serve(configListener)
-		if err != http.ErrServerClosed {
-			log.Fatalf("http.Serve: %s", err)
-		}
-	}()
-	u.ConfigClient = &config.Client{
-		ConfigServerURL: "http://" + configListener.Addr().String(),
-	}
+	u.ConfigServer, u.ConfigClient = sharedMock.LaunchConfigServer(u.Dir)
 
 	coordinatorPublic, coordinatorPrivate, _ := ed25519.GenerateKey(rand.Reader)
 	u.CoordinatorKey = coordinatorPublic
