@@ -73,3 +73,35 @@ func TestTypeSocket(t *testing.T) {
 		t.Fatal("timeout")
 	}
 }
+
+func TestLatency(t *testing.T) {
+	serverPublic, serverPrivate, _ := ed25519.GenerateKey(rand.Reader)
+
+	serverMux := NewMux(map[string]interface{}{})
+	hub := &Hub{
+		Mux:   serverMux,
+		conns: make(map[*serverConn]bool),
+	}
+	httpMux := http.NewServeMux()
+	httpMux.Handle("/ws", hub)
+	l, err := edtls.Listen("tcp", "127.0.0.1:0", serverPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go http.Serve(l, httpMux)
+
+	clientMux := NewMux(map[string]interface{}{})
+
+	conn, err := Dial(fmt.Sprintf("wss://%s/ws", l.Addr().String()), serverPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go conn.Serve(clientMux)
+	defer conn.Close()
+
+	time.Sleep(15 * time.Millisecond)
+	if conn.Latency() <= 0 {
+		t.Fatal("should have positive latency")
+	}
+}
