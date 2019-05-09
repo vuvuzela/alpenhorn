@@ -146,7 +146,7 @@ func (c *SignedConfig) Validate() error {
 	}
 	for i, guardian := range c.Guardians {
 		if len(guardian.Key) != ed25519.PublicKeySize {
-			return errors.New("invalid key for guardian %i: %v", i, guardian.Key)
+			return errors.New("invalid key for guardian %d: %v", i, guardian.Key)
 		}
 		if guardian.Username == "" {
 			return errors.New("invalid username for guardian %d: %q", i, guardian.Username)
