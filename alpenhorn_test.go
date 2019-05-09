@@ -22,11 +22,11 @@ import (
 	"vuvuzela.io/alpenhorn/coordinator"
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/internal/alplog"
-	"vuvuzela.io/alpenhorn/internal/mock"
 	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/crypto/rand"
 	"vuvuzela.io/internal/debug"
+	"vuvuzela.io/internal/mock"
 )
 
 type chanHandler struct {
