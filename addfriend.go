@@ -209,7 +209,7 @@ func (c *Client) extractPKGKeys(conn typesocket.Conn, v coordinator.PKGRound) {
 	}
 
 	hasErr := false
-	for _ = range st.Config.PKGServers {
+	for range st.Config.PKGServers {
 		err := <-errs
 		if err != nil {
 			hasErr = true
