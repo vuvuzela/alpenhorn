@@ -18,10 +18,10 @@ import (
 	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/edhttp"
-	"vuvuzela.io/alpenhorn/internal/mock"
 	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/crypto/ibe"
+	"vuvuzela.io/internal/mock"
 )
 
 func launchPKG(t *testing.T, regTokenHandler pkg.RegTokenHandler) (*mock.PKG, *pkg.CoordinatorClient) {
