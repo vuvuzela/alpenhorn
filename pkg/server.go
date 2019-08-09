@@ -85,12 +85,7 @@ func NewServer(conf *Config) (*Server, error) {
 		return nil, errors.New("nil RegTokenHandler")
 	}
 
-	opts := badger.DefaultOptions
-	opts.Dir = conf.DBPath
-	opts.ValueDir = conf.DBPath
-	opts.SyncWrites = true
-
-	db, err := badger.Open(opts)
+	db, err := badger.Open(badger.DefaultOptions(conf.DBPath).WithSyncWrites(true))
 	if err != nil {
 		return nil, err
 	}
