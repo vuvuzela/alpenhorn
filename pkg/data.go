@@ -5,12 +5,12 @@
 package pkg
 
 import (
+	"crypto/ed25519"
 	"encoding/binary"
 	"encoding/json"
 	"time"
 
 	"github.com/dgraph-io/badger"
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/errors"
 )

@@ -3,14 +3,13 @@ package edtls
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ed25519"
 )
 
 type fakeRand struct{}

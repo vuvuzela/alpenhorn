@@ -7,6 +7,7 @@ package cdn
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/gob"
 	"fmt"
 	"log"
@@ -18,7 +19,6 @@ import (
 
 	"github.com/boltdb/bolt"
 	"github.com/davidlazar/go-crypto/encoding/base32"
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/edtls"
 )

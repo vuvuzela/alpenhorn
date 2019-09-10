@@ -1,14 +1,13 @@
 package edtls
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"io"
 	"io/ioutil"
 	"net"
 	"sync"
 	"testing"
-
-	"golang.org/x/crypto/ed25519"
 )
 
 func TestClientVerificationFailure(t *testing.T) {

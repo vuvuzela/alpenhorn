@@ -1,13 +1,13 @@
 package typesocket
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/log"

@@ -6,6 +6,7 @@ package alpenhorn
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -14,8 +15,6 @@ import (
 	"reflect"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/cdn"
 	"vuvuzela.io/alpenhorn/config"

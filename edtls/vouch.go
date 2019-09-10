@@ -1,13 +1,12 @@
 package edtls
 
 import (
+	"crypto/ed25519"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/binary"
 	"time"
-
-	"golang.org/x/crypto/ed25519"
 )
 
 // generated with a reimplementation of

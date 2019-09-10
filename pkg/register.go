@@ -5,6 +5,7 @@
 package pkg
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
 	"github.com/dgraph-io/badger"
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/log"
 )

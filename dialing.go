@@ -5,10 +5,10 @@
 package alpenhorn
 
 import (
+	"crypto/ed25519"
 	"sync/atomic"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/addfriend"
 	"vuvuzela.io/alpenhorn/bloom"

@@ -1,14 +1,13 @@
 package typesocket
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
 	"log"
 	"net/http"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/edtls"
 )

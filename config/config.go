@@ -6,6 +6,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/sha512"
 	"encoding/json"
 	"reflect"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/pkg"

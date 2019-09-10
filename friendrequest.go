@@ -5,9 +5,8 @@
 package alpenhorn
 
 import (
+	"crypto/ed25519"
 	"errors"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/pkg"
 )

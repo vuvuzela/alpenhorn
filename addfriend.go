@@ -5,6 +5,7 @@
 package alpenhorn
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding"
@@ -13,7 +14,6 @@ import (
 	"sync/atomic"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
-	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/box"
 
 	"vuvuzela.io/alpenhorn/addfriend"

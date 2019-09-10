@@ -2,6 +2,7 @@ package edtls
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -13,8 +14,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ed25519"
 )
 
 func TestServer(t *testing.T) {

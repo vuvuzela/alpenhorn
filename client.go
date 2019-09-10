@@ -6,10 +6,9 @@
 package alpenhorn
 
 import (
+	"crypto/ed25519"
 	"fmt"
 	"sync"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/edhttp"

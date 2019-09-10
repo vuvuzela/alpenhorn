@@ -2,12 +2,11 @@ package edtls
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
 	"net"
 	"time"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/errors"
 )

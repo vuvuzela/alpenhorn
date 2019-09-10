@@ -8,6 +8,7 @@ package pkg
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha512"
 	"encoding/binary"
@@ -19,7 +20,6 @@ import (
 	"sync"
 
 	"github.com/dgraph-io/badger"
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/edtls"

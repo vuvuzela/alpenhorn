@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
 	"io/ioutil"
@@ -14,7 +15,6 @@ import (
 	"path/filepath"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
-	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/crypto/ssh/terminal"
 

@@ -6,13 +6,13 @@ package pkg
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 
-	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/box"
 
 	"vuvuzela.io/alpenhorn/edhttp"

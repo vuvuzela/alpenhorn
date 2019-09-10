@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -13,8 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"text/template"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/cdn"
 	"vuvuzela.io/alpenhorn/cmd/cmdutil"

@@ -2,6 +2,7 @@ package edtls
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
@@ -11,8 +12,6 @@ import (
 	"net"
 	"sync"
 	"time"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/errors"
 )

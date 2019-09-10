@@ -6,6 +6,7 @@ package pkg
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger"
-	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/box"
 
 	"vuvuzela.io/alpenhorn/log"

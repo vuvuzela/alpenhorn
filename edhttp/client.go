@@ -9,14 +9,13 @@ package edhttp
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"sync"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/errors"

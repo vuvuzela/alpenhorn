@@ -5,13 +5,12 @@
 package pkg
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"testing"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/log"
 )

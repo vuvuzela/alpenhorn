@@ -5,10 +5,9 @@
 package alpenhorn
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"io/ioutil"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/internal/ioutil2"

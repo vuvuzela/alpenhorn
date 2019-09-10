@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -14,7 +15,6 @@ import (
 	"path/filepath"
 	"text/template"
 
-	"golang.org/x/crypto/ed25519"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 

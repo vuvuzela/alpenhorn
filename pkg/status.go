@@ -6,11 +6,11 @@ package pkg
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
 
 	"github.com/dgraph-io/badger"
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/bloom"
 	"vuvuzela.io/alpenhorn/log"

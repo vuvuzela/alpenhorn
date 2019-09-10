@@ -6,6 +6,7 @@
 package coordinator
 
 import (
+	"crypto/ed25519"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
-	"golang.org/x/crypto/ed25519"
 	"golang.org/x/net/context"
 
 	"vuvuzela.io/alpenhorn/addfriend"

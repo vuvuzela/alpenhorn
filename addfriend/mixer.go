@@ -7,6 +7,7 @@ package addfriend
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
@@ -16,8 +17,6 @@ import (
 	"strconv"
 	"sync"
 	"unsafe"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/edhttp"
 	"vuvuzela.io/alpenhorn/errors"

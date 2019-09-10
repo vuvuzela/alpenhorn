@@ -6,10 +6,9 @@ package toml
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ed25519"
 )
 
 type config struct {

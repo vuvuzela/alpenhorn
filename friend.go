@@ -5,10 +5,9 @@
 package alpenhorn
 
 import (
+	"crypto/ed25519"
 	"fmt"
 	"time"
-
-	"golang.org/x/crypto/ed25519"
 )
 
 // Friend is an entry in the client's address book.

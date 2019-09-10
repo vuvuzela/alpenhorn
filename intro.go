@@ -6,10 +6,9 @@ package alpenhorn
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/binary"
 	"unsafe"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/crypto/bls"

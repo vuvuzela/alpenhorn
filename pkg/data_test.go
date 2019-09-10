@@ -5,12 +5,11 @@
 package pkg
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"reflect"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ed25519"
 )
 
 func TestMarshalUserState(t *testing.T) {

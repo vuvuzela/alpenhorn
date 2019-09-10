@@ -5,6 +5,7 @@
 package config
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
 	"reflect"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/pkg"
 	"vuvuzela.io/internal/debug"

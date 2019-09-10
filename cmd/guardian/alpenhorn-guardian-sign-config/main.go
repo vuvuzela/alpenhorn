@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,11 +15,11 @@ import (
 	"path/filepath"
 
 	"github.com/davidlazar/go-crypto/encoding/base32"
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/cmd/guardian"
 	"vuvuzela.io/alpenhorn/config"
 	"vuvuzela.io/alpenhorn/log"
+
 	// Register the convo inner config.
 	_ "vuvuzela.io/vuvuzela/convo"
 )

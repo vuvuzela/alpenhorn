@@ -5,12 +5,11 @@
 package pkg
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
 	"reflect"
 	"testing"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/crypto/bls"
 )

@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/rand"
 	"flag"
 	"fmt"
@@ -16,8 +17,6 @@ import (
 	"strings"
 	"text/template"
 	"time"
-
-	"golang.org/x/crypto/ed25519"
 
 	"vuvuzela.io/alpenhorn/cmd/cmdutil"
 	"vuvuzela.io/alpenhorn/config"
