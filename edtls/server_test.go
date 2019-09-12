@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net"
 	"sync"
 	"testing"
 	"time"
@@ -27,7 +26,8 @@ func TestServer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pipeClient, pipeServer := net.Pipe()
+	pipe := localPipe()
+	defer pipe.Close()
 
 	var seen []byte
 	var wg sync.WaitGroup
@@ -36,9 +36,8 @@ func TestServer(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		defer t.Logf("client done")
-		defer pipeClient.Close()
 		t.Logf("client new")
-		conn := Client(pipeClient, serverPublicKey, clientPrivateKey)
+		conn := Client(pipe.client, serverPublicKey, clientPrivateKey)
 		if err := conn.Handshake(); err != nil {
 			t.Error(err)
 			return
@@ -59,9 +58,8 @@ func TestServer(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		defer t.Logf("server done")
-		defer pipeServer.Close()
 		t.Logf("server new")
-		conn := Server(pipeServer, serverPrivateKey)
+		conn := Server(pipe.server, serverPrivateKey)
 		if err := conn.Handshake(); err != nil {
 			conn.Close()
 			t.Error(err)
@@ -77,7 +75,7 @@ func TestServer(t *testing.T) {
 			return
 		}
 		t.Logf("server verifying")
-		peerKey := GetSigningKey(state.PeerCertificates[0])
+		peerKey := state.PeerCertificates[0].PublicKey.(ed25519.PublicKey)
 		if !bytes.Equal(peerKey, clientPublicKey) {
 			t.Error("edtls verification failed")
 			return
@@ -140,7 +138,7 @@ func TestExpiration(t *testing.T) {
 			}
 			clientCert := state.PeerCertificates[0]
 
-			peerKey := GetSigningKey(clientCert)
+			peerKey := clientCert.PublicKey.(ed25519.PublicKey)
 			if !bytes.Equal(peerKey, clientPublicKey) {
 				t.Fatalf("edtls verification failed with key %q", base64.RawURLEncoding.EncodeToString(clientPublicKey))
 			}
@@ -252,5 +250,37 @@ func BenchmarkNewSelfSignedCert(b *testing.B) {
 	}
 	for i := 0; i < b.N; i++ {
 		newSelfSignedCert(serverPrivateKey)
+	}
+}
+
+func TestSelfSignedCert(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	certBytes, err := newSelfSignedCert(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cert, err := x509.ParseCertificate(certBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = cert.CheckSignatureFrom(cert)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, priv2, _ := ed25519.GenerateKey(rand.Reader)
+	certBytes2, err := newSelfSignedCert(priv2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert2, err := x509.ParseCertificate(certBytes2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = cert.CheckSignatureFrom(cert2)
+	if err == nil {
+		t.Fatal("expected a verification failure")
 	}
 }

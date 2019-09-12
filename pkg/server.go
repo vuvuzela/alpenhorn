@@ -22,7 +22,6 @@ import (
 	"github.com/dgraph-io/badger"
 
 	"vuvuzela.io/alpenhorn/edhttp"
-	"vuvuzela.io/alpenhorn/edtls"
 	"vuvuzela.io/alpenhorn/errors"
 	"vuvuzela.io/alpenhorn/log"
 	"vuvuzela.io/crypto/bls"
@@ -140,7 +139,11 @@ func (srv *Server) authorized(key ed25519.PublicKey, w http.ResponseWriter, req 
 		httpError(w, errorf(ErrUnauthorized, "no peer tls certificate"))
 		return false
 	}
-	peerKey := edtls.GetSigningKey(req.TLS.PeerCertificates[0])
+	peerKey, ok := req.TLS.PeerCertificates[0].PublicKey.(ed25519.PublicKey)
+	if !ok {
+		httpError(w, errorf(ErrUnauthorized, "expecting ed25519 certificate"))
+		return false
+	}
 	if !bytes.Equal(peerKey, key) {
 		httpError(w, errorf(ErrUnauthorized, "peer key is not authorized"))
 		return false

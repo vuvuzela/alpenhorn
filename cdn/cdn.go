@@ -19,8 +19,6 @@ import (
 
 	"github.com/boltdb/bolt"
 	"github.com/davidlazar/go-crypto/encoding/base32"
-
-	"vuvuzela.io/alpenhorn/edtls"
 )
 
 type Server struct {
@@ -112,7 +110,11 @@ func (srv *Server) newBucket(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	cert := req.TLS.PeerCertificates[0]
-	peerKey := edtls.GetSigningKey(cert)
+	peerKey, ok := cert.PublicKey.(ed25519.PublicKey)
+	if !ok {
+		http.Error(w, "expecting ed25519 certificate", http.StatusUnauthorized)
+		return
+	}
 	if !bytes.Equal(peerKey, srv.coordinatorKey) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -150,7 +152,11 @@ func (srv *Server) put(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	cert := req.TLS.PeerCertificates[0]
-	peerKey := edtls.GetSigningKey(cert)
+	peerKey, ok := cert.PublicKey.(ed25519.PublicKey)
+	if !ok {
+		http.Error(w, "expecting ed25519 certificate", http.StatusUnauthorized)
+		return
+	}
 
 	cdnBucket, boltBucket, prefix, err := parseURL(req.URL)
 	if err != nil {

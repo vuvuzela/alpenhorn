@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"net"
-	"time"
 
 	"vuvuzela.io/alpenhorn/errors"
 )
@@ -33,7 +32,7 @@ func NewTLSClientConfig(myKey ed25519.PrivateKey, peerKey ed25519.PublicKey) *tl
 	var config = &tls.Config{
 		RootCAs:            x509.NewCertPool(),
 		ClientAuth:         tls.RequestClientCert,
-		MinVersion:         tls.VersionTLS12,
+		MinVersion:         tls.VersionTLS13,
 		InsecureSkipVerify: true,
 
 		GetClientCertificate: func(req *tls.CertificateRequestInfo) (*tls.Certificate, error) {
@@ -41,13 +40,13 @@ func NewTLSClientConfig(myKey ed25519.PrivateKey, peerKey ed25519.PublicKey) *tl
 				return &tls.Certificate{}, nil
 			}
 
-			certDER, certKey, err := newSelfSignedCert(myKey)
+			certDER, err := newSelfSignedCert(myKey)
 			if err != nil {
 				return nil, errors.New("error generating self-signed certificate: %s", err)
 			}
 			cert := &tls.Certificate{
 				Certificate: [][]byte{certDER},
-				PrivateKey:  certKey,
+				PrivateKey:  myKey,
 			}
 			return cert, nil
 		},
@@ -66,9 +65,12 @@ func NewTLSClientConfig(myKey ed25519.PrivateKey, peerKey ed25519.PublicKey) *tl
 				return errors.Wrap(err, "x509.ParseCertificate")
 			}
 
-			theirKey, ok := verify(cert, time.Now())
-			if !ok {
+			if err := cert.CheckSignatureFrom(cert); err != nil {
 				return ErrVerificationFailed
+			}
+			theirKey, ok := cert.PublicKey.(ed25519.PublicKey)
+			if !ok {
+				return errors.New("invalid public key type in certificate: %T", cert.PublicKey)
 			}
 			if !bytes.Equal(theirKey, peerKey) {
 				return ErrVerificationFailed

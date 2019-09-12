@@ -1,9 +1,7 @@
 package edtls
 
 import (
-	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -42,14 +40,14 @@ func NewTLSServerConfig(key ed25519.PrivateKey) *tls.Config {
 				return currCert, nil
 			}
 
-			certDER, certKey, err := newSelfSignedCert(key)
+			certDER, err := newSelfSignedCert(key)
 			if err != nil {
 				return nil, fmt.Errorf("error generating self-signed certificate: %s", err)
 			}
 
 			currCert = &tls.Certificate{
 				Certificate: [][]byte{certDER},
-				PrivateKey:  certKey,
+				PrivateKey:  key,
 			}
 			expiry = time.Now().Add(2 * certDuration / 3)
 			return currCert, nil
@@ -69,8 +67,7 @@ func NewTLSServerConfig(key ed25519.PrivateKey) *tls.Config {
 				return errors.Wrap(err, "x509.ParseCertificate")
 			}
 
-			_, ok := verify(cert, time.Now())
-			if !ok {
+			if err := cert.CheckSignatureFrom(cert); err != nil {
 				return ErrVerificationFailed
 			}
 
@@ -79,7 +76,7 @@ func NewTLSServerConfig(key ed25519.PrivateKey) *tls.Config {
 
 		RootCAs:    x509.NewCertPool(),
 		ClientAuth: tls.RequestClientCert,
-		MinVersion: tls.VersionTLS12,
+		MinVersion: tls.VersionTLS13,
 	}
 
 	return config
@@ -87,12 +84,7 @@ func NewTLSServerConfig(key ed25519.PrivateKey) *tls.Config {
 
 var certDuration = 1 * time.Hour
 
-func newSelfSignedCert(key ed25519.PrivateKey) ([]byte, *ecdsa.PrivateKey, error) {
-	dsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, nil, err
-	}
-
+func newSelfSignedCert(key ed25519.PrivateKey) ([]byte, error) {
 	// generate a self-signed cert
 	now := time.Now()
 	expiry := now.Add(certDuration)
@@ -101,19 +93,16 @@ func newSelfSignedCert(key ed25519.PrivateKey) ([]byte, *ecdsa.PrivateKey, error
 		NotBefore:    now.UTC().AddDate(0, 0, -1),
 		NotAfter:     expiry.UTC(),
 
-		KeyUsage: x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+
+		KeyUsage: x509.KeyUsageCertSign,
 	}
 
-	if key != nil {
-		if err := Vouch(key, template, &dsaKey.PublicKey); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &dsaKey.PublicKey, dsaKey)
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return certDER, dsaKey, nil
+	return certDER, nil
 }
